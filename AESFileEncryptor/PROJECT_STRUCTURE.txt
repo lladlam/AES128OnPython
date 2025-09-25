@@ -1,0 +1,13 @@
+AESFileEncryptor/
+│
+├── src/                    # 源代码目录
+│   ├── __init__.py         # 包初始化文件
+│   ├── crypto_utils.py     # AES加密解密核心功能
+│   └── main.py             # 主程序入口及GUI界面
+│
+├── docs/                   # 文档目录
+│   ├── README.md           # 使用说明
+│   └── AES_TECHNICAL.md    # AES技术说明
+│
+├── requirements.txt        # 项目依赖
+└── README.md              # 项目概述
