@@ -1,4 +1,5 @@
-![](https://moe.8845.top/get/?name=AES128OnPython&theme=moebooru)
+<img src="https://count.i80k.com/api/counter?name=AES128OnPython&theme=rule34&length=7&scale=1&offset=0&align=center&pixelate=on&darkmode=auto" alt="AES128OnPython" />
+
 # AES128OnPython
 基于Python的AES加密器，可以直接加密解密并且在软件内查看加密的文件
 # AES-128文件加密器
