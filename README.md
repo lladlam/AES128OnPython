@@ -1,3 +1,4 @@
+![计数器](https://moe.8845.top/get/?name=AES128OnPython&theme=asoul)
 # AES128OnPython
 基于Python的AES加密器，可以直接加密解密并且在软件内查看加密的文件
 # AES-128文件加密器
