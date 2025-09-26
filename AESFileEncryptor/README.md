@@ -12,24 +12,19 @@ AES-128文件加密器是一款使用AES-128算法对文件进行加密和解密
 - 📁 **多目录支持**：可在任意目录中进行加密操作
 - 🔐 **统一密码管理**：一次设置，多次使用
 - 🗂️ **文件名混淆**：加密后使用UUID文件名保护隐私
-- 🛡️ **源码保护**：核心代码经过字节码保护
 
 ## 目录结构
 
 ```
 AESFileEncryptor/
 ├── src/                    # 源代码
-│   ├── main.py            # 主程序
-│   ├── crypto_utils.py    # 加密解密核心
-│   └── password_manager.py # 密码管理
+│   └── main.py            # 主程序
 ├── docs/                  # 文档
 │   ├── README.md          # 本文件
 │   ├── USER_GUIDE.md      # 用户指南
 │   ├── INSTALLATION.md    # 安装说明
 │   └── ...                # 其他文档
-├── Data/                  # 默认加密文件存储目录
-├── requirements.txt       # 依赖列表
-└── backup/                # 源码备份
+└── requirements.txt       # 依赖列表
 ```
 
 ## 安装和运行
@@ -83,7 +78,7 @@ pythonw AESFileEncryptor/src/main.py
 
 ## 版本信息
 
-- **版本**：2.0
+- **版本**：2.1
 - **发布日期**：2025年
 - **功能**：加密/解密/查看 + 源码保护 + 多目录支持
 
