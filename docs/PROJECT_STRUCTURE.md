@@ -9,13 +9,7 @@ AES-128文件加密器的完整项目结构，包含源代码、文档和资源�
 ```
 AESFileEncryptor/
 ├── src/                    # 源代码目录
-│   ├── main.py            # 主程序入口，GUI界面
-│   ├── crypto_utils.py    # 加密解密核心功能
-│   ├── password_manager.py # 密码管理模块
-│   ├── launcher.py        # 加密版启动器（备用）
-│   ├── run_encrypted.py   # 加密版主启动器
-│   ├── compile_src.py     # 源码编译脚本
-│   └── create_executable.py # 打包脚本
+│   ├── main.py            # 主程序，包含所有代码
 ├── docs/                  # 文档目录
 │   ├── README.md          # 主要使用说明
 │   ├── USER_GUIDE.md      # 详细用户指南
@@ -23,36 +17,23 @@ AESFileEncryptor/
 │   ├── AES_TECHNICAL.md   # AES技术说明
 │   ├── PYTHON_REQUIREMENTS.md # Python依赖说明
 │   ├── INSTALLATION.md    # 安装和运行说明
-│   ├── ENCRYPTION_IMPLEMENTATION.md # 源码保护实现说明
 │   └── SECURE_README.md   # 源码保护版说明
-├── Data/                  # 加密文件存储目录（默认）
-├── requirements.txt       # Python依赖列表
-├── AESFileEncryptor.spec  # PyInstaller打包配置（如果创建了）
-└── backup/                # 源代码备份目录
-    ├── crypto_utils.py
-    ├── password_manager.py
-    └── main.py
+└── requirements.txt       # Python依赖列表
 ```
 
 ## 详细目录说明
 
 ### src/ 目录 - 源代码文件
 - **main.py**: 主程序文件，包含GUI界面实现和主要业务逻辑
-- **crypto_utils.py**: 核心加密解密功能模块
   - AESCipher类：AES加密解密实现
   - encrypt_file(): 文件加密函数
   - decrypt_file(): 文件解密函数
   - view_encrypted_file(): 查看加密文件内容函数
   - get_encrypted_files_list(): 获取加密文件列表函数
-- **password_manager.py**: 密码管理模块
   - save_password(): 保存加密密码
   - verify_password(): 验证密码
   - is_password_set(): 检查密码是否已设置
   - clear_data_folder(): 清空数据文件夹
-- **run_encrypted.py**: 从字节码运行程序的启动器
-- **launcher.py**: 备用启动器
-- **compile_src.py**: 将源代码编译为字节码的脚本
-- **create_executable.py**: 创建可执行文件的脚本
 
 ### Data/ 目录 - 加密文件存储
 - 存储所有加密后的文件（.llaes格式）
@@ -66,12 +47,6 @@ AESFileEncryptor/
 - **AES_TECHNICAL.md**: AES加密算法技术说明
 - **PYTHON_REQUIREMENTS.md**: Python运行库需求说明
 - **INSTALLATION.md**: 安装和运行详细说明
-- **ENCRYPTION_IMPLEMENTATION.md**: 源码保护实现说明
-- **SECURE_README.md**: 源码保护版使用说明
-
-### backup/ 目录 - 源代码备份
-- 包含编译前的原始源代码备份
-- 用于恢复和修改源代码
 
 ## 文件扩展名说明
 
@@ -81,7 +56,6 @@ AESFileEncryptor/
 - **.meta**: 加密元数据文件（存储原始文件名等信息）
 - **.md**: Markdown格式文档文件
 - **.txt**: 文本文件
-- **.spec**: PyInstaller打包配置文件
 
 ## 配置文件
 
@@ -97,14 +71,8 @@ pycryptodome>=3.10.1
 main.py
 ├── crypto_utils.py (加密解密功能)
 ├── password_manager.py (密码管理)
-└── tkinter (Python内置GUI库)
-
-crypto_utils.py
-└── pycryptodome (加密算法)
-
-password_manager.py
 ├── pycryptodome (加密算法)
-└── hashlib (Python内置哈希算法)
+└── tkinter (Python内置GUI库)
 
 运行时依赖：
 ├── Python 3.6+
