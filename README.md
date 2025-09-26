@@ -20,17 +20,15 @@ AES-128文件加密器是一款使用AES-128算法对文件进行加密和解密
 ## 目录结构
 
 ```
-AES128OnPython/
-├── main.py                  # 主程序，包含所有代码          
-├── docs/                  # 文档目录
-│   ├── USER_GUIDE.md      # 详细用户指南
-│   ├── QUICK_START.md     # 快速入门指南
-│   ├── AES_TECHNICAL.md   # AES技术说明
-│   ├── PYTHON_REQUIREMENTS.md # Python依赖说明
-│   ├── INSTALLATION.md    # 安装和运行说明
-│   └── SECURE_README.md   # 源码保护版说明
-├── requirements.txt       # Python依赖列表
-└──  README.md          # 主要使用说明
+AESFileEncryptor/
+├── src/                    # 源代码
+│   └── main.py            # 主程序
+├── docs/                  # 文档
+│   ├── README.md          # 本文件
+│   ├── USER_GUIDE.md      # 用户指南
+│   ├── INSTALLATION.md    # 安装说明
+│   └── ...                # 其他文档
+└── requirements.txt       # 依赖列表
 ```
 
 ## 安装和运行
@@ -84,9 +82,16 @@ pythonw AESFileEncryptor/src/main.py
 
 ## 版本信息
 
-- **版本**：2.2
+- **版本**：2.3.0 beta1
 - **发布日期**：2025年
-- **功能**：加密/解密/查看 + 源码保护 + 多目录支持
+- **功能**：加密/解密/查看 + 源码保护 + 多目录支持 + 自动删除 + 密码修改
+
+## 新功能 (v2.3.0 beta1)
+
+- 🗂️ **自动Data文件夹管理**：程序启动时自动检查并创建Data文件夹
+- 🧹 **自动清理**：解密后自动删除加密文件和元数据文件
+- 🔑 **密码修改**：用户可在设置中安全修改主密码
+- 📁 **统一存储位置**：所有加密文件存储在main.py同目录下的Data文件夹
 
 ## 许可证
 
