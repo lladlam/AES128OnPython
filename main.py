@@ -739,6 +739,9 @@ class FileEncryptionApp:
 
         # 绑定选择事件
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
+        
+        # 绑定右键单击事件以显示上下文菜单
+        self.file_tree.bind("<Button-3>", self.show_context_menu)  # Button-3 代表右键
 
         # 配置列表框架的权重
         list_frame.columnconfigure(0, weight=1)
@@ -1054,6 +1057,83 @@ class FileEncryptionApp:
             if item['tags']:
                 self.selected_encrypted_file = item['tags'][0]
     
+    def show_context_menu(self, event):
+        """
+        显示右键菜单
+        """
+        # 获取右键点击位置的项目
+        item_id = self.file_tree.identify_row(event.y)
+        if item_id:
+            # 选中该项目，以便删除操作作用于正确的文件
+            self.file_tree.selection_set(item_id)
+            self.on_file_select(None)  # 更新 self.selected_encrypted_file
+
+            # 创建上下文菜单
+            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="删除文件", command=self.delete_selected_file)
+
+            # 在鼠标位置显示菜单
+            try:
+                context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                context_menu.grab_release()  # 确保菜单在点击后消失
+
+    def delete_selected_file(self):
+        """
+        删除选中的加密文件及其元数据
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+
+        # 从加密文件路径推断元数据文件路径
+        encrypted_filename = os.path.basename(self.selected_encrypted_file)
+        base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
+        metadata_filename = base_uuid + '.meta'
+        metadata_path = os.path.join(os.path.dirname(self.selected_encrypted_file), metadata_filename)
+
+        # 确认删除
+        result = messagebox.askyesno("确认删除", f"确定要删除以下文件吗？\n\n加密文件: {encrypted_filename}\n元数据文件: {metadata_filename}")
+        if not result:
+            return  # 用户取消了删除
+
+        try:
+            # 删除加密文件
+            os.remove(self.selected_encrypted_file)
+            print(f"已删除加密文件: {self.selected_encrypted_file}")  # 日志记录
+
+            # 删除对应的元数据文件（如果存在）
+            if os.path.exists(metadata_path):
+                os.remove(metadata_path)
+                print(f"已删除元数据文件: {metadata_path}")  # 日志记录
+            else:
+                print(f"未找到元数据文件: {metadata_path}, 可能已损坏或不包含元数据") # 日志记录
+
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"文件删除操作完成。\n")
+            self.result_text.insert(tk.END, f"已删除加密文件: {encrypted_filename}\n")
+            # 因为在删除前已经检查并处理了元数据文件，所以这里只需记录操作
+            self.result_text.insert(tk.END, f"尝试删除元数据文件: {metadata_filename}\n")
+
+            # 刷新文件列表以反映更改
+            self.refresh_file_list()
+            messagebox.showinfo("成功", f"文件已删除!\n加密文件: {encrypted_filename}")
+
+        except FileNotFoundError as fnf_error:
+            error_msg = f"删除失败: 找不到文件 - {fnf_error}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+        except PermissionError as perm_error:
+            error_msg = f"删除失败: 权限不足 - {perm_error}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+        except Exception as e:
+            error_msg = f"删除文件时发生错误: {str(e)}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+
+
     def add_file(self):
         """
         添加文件并加密
@@ -1214,6 +1294,7 @@ class FileEncryptionApp:
                 self.encrypt_file_with_master_password(file_path)
             else:
                 print(f"警告: 文件不存在 - {file_path}")
+
 
     
     def encrypt_file_with_master_password(self, file_path):
