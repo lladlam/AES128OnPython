@@ -22,7 +22,7 @@ AES128OnPython/
 
 ## 详细目录说明
 
-###  目录 - 源代码文件
+### src/ 目录 - 源代码文件
 - **main.py**: 主程序文件，包含GUI界面实现和主要业务逻辑
   - AESCipher类：AES加密解密实现
   - encrypt_file(): 文件加密函数
@@ -85,8 +85,9 @@ main.py
 
 ```
 AES128OnPython/
+├── main.py
+├── Data/ (或用户指定的其他目录)  # 现在加密文件存储在此目录下
 ├── docs/
-├── Data/ (或用户指定的其他目录)
 ├── [临时文件] (系统Temp目录中的临时解密文件)
 └── password.pwd (加密存储的密码文件，在Data目录中，文件名混淆)
 ```

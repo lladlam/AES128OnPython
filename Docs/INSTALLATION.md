@@ -34,6 +34,9 @@ python3 --version
 ### 自动安装（推荐）
 1. 打开命令行/终端
 2. 导航到项目根目录：
+   ```bash
+   cd D:\Qwen\DataAES128_byPython\AESFileEncryptor
+   ```
 3. 安装依赖：
    ```bash
    pip install -r requirements.txt
@@ -212,3 +215,8 @@ print('所有依赖验证通过！')
 2. 所有依赖是否正确安装
 3. 系统是否满足硬件要求
 4. 防火墙或安全软件是否阻止程序运行
+
+## 版本信息
+
+- **当前版本**：V2.3.0-beta5
+- 集成 V2.3.0-beta4 的命令行功能、密码安全修复、语法错误修复和其他功能，新增右键删除文件功能
