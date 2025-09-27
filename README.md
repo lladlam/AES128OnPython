@@ -107,7 +107,7 @@ pythonw AESFileEncryptor/src/main.py
 
 ## 许可证
 
-本项目使用GPL-3.0-or-later许可证，欢迎贡献和改进。
+本项目使用MIT许可证，欢迎贡献和改进。
 
 ---
 *一个安全、易用、功能完整的文件加密解决方案*
