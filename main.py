@@ -825,8 +825,8 @@ class FileEncryptionApp:
                                    font=("Arial", 8), foreground="gray")
         copyright_label.grid(row=0, column=0, sticky=tk.W)
         
-        # 添加版本号标签 (V2.4)
-        self.version_label = ttk.Label(bottom_frame, text="V2.4", 
+        # 添加版本号标签 (V2.4-beta1)
+        self.version_label = ttk.Label(bottom_frame, text="V2.4-beta1", 
                                       font=("Arial", 8), foreground="gray")
         self.version_label.grid(row=0, column=1, sticky=tk.E)
         
@@ -1271,41 +1271,255 @@ class FileEncryptionApp:
         """
         打开设置窗口
         """
-        # 创建设置窗口
         settings_window = tk.Toplevel(self.root)
         settings_window.title("设置")
-        settings_window.geometry("400x200")
+        settings_window.geometry("300x300")
         
-        # 主框架
         main_frame = ttk.Frame(settings_window, padding="20")
-        main_frame.pack(fill='both', expand=True)
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # 版本号显示设置
-        version_var = tk.BooleanVar(value=self.config.get("show_version", True))
-        version_check = ttk.Checkbutton(main_frame, text="显示版本号", variable=version_var)
-        version_check.pack(anchor='w', pady=5)
+        # 标题
+        title_label = ttk.Label(main_frame, text="设置", font=("Arial", 14, "bold"))
+        title_label.grid(row=0, column=0, columnspan=2, pady=10)
         
-        # 复制加密文件设置
+        # 版本号显示开关
+        show_version_var = tk.BooleanVar(value=self.config.get("show_version", True))
+        version_checkbox = ttk.Checkbutton(
+            main_frame, 
+            text="显示版本号", 
+            variable=show_version_var,
+            command=lambda: self.toggle_version_display(show_version_var.get())
+        )
+        version_checkbox.grid(row=1, column=0, columnspan=2, pady=5, sticky=tk.W)
+        
+        # 复制加密文件开关
         copy_encrypted_var = tk.BooleanVar(value=self.config.get("copy_encrypted_file", False))
-        copy_encrypted_check = ttk.Checkbutton(main_frame, text="复制加密文件而非解密后文件", variable=copy_encrypted_var)
-        copy_encrypted_check.pack(anchor='w', pady=5)
+        copy_encrypted_checkbox = ttk.Checkbutton(
+            main_frame, 
+            text="复制加密文件（否则复制解密文件）", 
+            variable=copy_encrypted_var,
+            command=lambda: self.toggle_copy_encrypted_setting(copy_encrypted_var.get())
+        )
+        copy_encrypted_checkbox.grid(row=2, column=0, columnspan=2, pady=5, sticky=tk.W)
+        
+        # 修改密码按钮
+        change_password_btn = ttk.Button(main_frame, text="修改密码", command=lambda: self.open_change_password(settings_window))
+        change_password_btn.grid(row=3, column=0, columnspan=2, pady=10)
+    
+    def open_change_password(self, parent_window):
+        """
+        打开修改密码窗口
+        """
+        change_window = tk.Toplevel(parent_window)
+        change_window.title("修改密码")
+        change_window.geometry("400x300")
+        
+        main_frame = ttk.Frame(change_window, padding="20")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # 标题
+        title_label = ttk.Label(main_frame, text="修改密码", font=("Arial", 14, "bold"))
+        title_label.grid(row=0, column=0, columnspan=2, pady=10)
+        
+        # 旧密码输入
+        ttk.Label(main_frame, text="旧密码").grid(row=1, column=0, sticky=tk.W, pady=5)
+        old_password_var = tk.StringVar()
+        old_password_entry = ttk.Entry(main_frame, textvariable=old_password_var, show="*", width=25)
+        old_password_entry.grid(row=1, column=1, pady=5)
+        
+        # 新密码输入
+        ttk.Label(main_frame, text="新密码").grid(row=2, column=0, sticky=tk.W, pady=5)
+        new_password_var = tk.StringVar()
+        new_password_entry = ttk.Entry(main_frame, textvariable=new_password_var, show="*", width=25)
+        new_password_entry.grid(row=2, column=1, pady=5)
+        
+        # 确认新密码
+        ttk.Label(main_frame, text="确认新密码").grid(row=3, column=0, sticky=tk.W, pady=5)
+        confirm_new_password_var = tk.StringVar()
+        confirm_new_password_entry = ttk.Entry(main_frame, textvariable=confirm_new_password_var, show="*", width=25)
+        confirm_new_password_entry.grid(row=3, column=1, pady=5)
         
         # 按钮框架
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(pady=20)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=20)
         
-        # 保存按钮
-        def save_settings():
-            # 更新配置
-            self.toggle_version_display(version_var.get())
-            self.toggle_copy_encrypted_setting(copy_encrypted_var.get())
-            settings_window.destroy()
-            messagebox.showinfo("成功", "设置已保存")
-        
-        ttk.Button(button_frame, text="保存", command=save_settings).pack(side='left', padx=5)
+        # 确认按钮
+        ttk.Button(button_frame, text="确认", command=lambda: self.change_password(
+            old_password_var.get(), 
+            new_password_var.get(), 
+            confirm_new_password_var.get(), 
+            change_window, 
+            parent_window
+        )).grid(row=0, column=0, padx=5)
         
         # 取消按钮
-        ttk.Button(button_frame, text="取消", command=settings_window.destroy).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="取消", command=change_window.destroy).grid(row=0, column=1, padx=5)
+    
+    def change_password(self, old_password, new_password, confirm_new_password, change_window, parent_window):
+        """
+        修改密码
+        """
+        # 验证旧密码是否正确
+        if not verify_password(old_password):
+            messagebox.showerror("错误", "旧密码错误")
+            return
+        
+        # 验证新密码
+        if not new_password:
+            messagebox.showerror("错误", "请输入新密码")
+            return
+        
+        if new_password != confirm_new_password:
+            messagebox.showerror("错误", "两次输入的新密码不一致")
+            return
+        
+        if len(new_password) < 6:
+            messagebox.showerror("错误", "密码长度至少为6位")
+            return
+        
+        # --- NEW: Find old password and meta file names BEFORE saving new password ---
+        old_pwd_path = None
+        old_meta_path = None
+
+        # Iterate through .meta files in DATA_DIR, try to decrypt each with old password
+        for filename in os.listdir(DATA_DIR):
+            if filename.endswith('.meta'):
+                meta_path = os.path.join(DATA_DIR, filename)
+                try:
+                    with open(meta_path, 'rb') as f:
+                        encrypted_meta = f.read()
+
+                    # Try to decrypt the meta file with the old password
+                    decrypted_meta_json = _decrypt_data(encrypted_meta, old_password)
+                    meta_data = json.loads(decrypted_meta_json)
+
+                    # If decryption is successful, we found the correct meta file and pwd file name
+                    actual_pwd_filename = meta_data.get("filename")
+                    if actual_pwd_filename:
+                        pwd_path = os.path.join(DATA_DIR, actual_pwd_filename)
+                        # Verify that the corresponding .pwd file also exists
+                        if os.path.exists(pwd_path):
+                            old_pwd_path = pwd_path
+                            old_meta_path = meta_path
+                            # We have found the old files, break the loop
+                            break
+                except Exception:
+                    # If decryption fails, continue to the next .meta file
+                    continue
+
+        # Check if we found the old files
+        if not old_pwd_path or not old_meta_path:
+            messagebox.showerror("错误", "无法定位旧的密码文件，可能存在数据损坏。")
+            return
+        # --- END NEW ---
+
+        try:
+            # 获取所有加密文件的列表
+            encrypted_files = get_encrypted_files_list(old_password)
+            
+            # 使用新密码保存密码(this creates new .pwd and .meta files)
+            save_password(new_password)
+            
+            # Update the main password
+            self.master_password = new_password
+            
+            # 重新加密所有文件
+            for file_info in encrypted_files:
+                encrypted_file_path = file_info['encrypted_path']
+                
+                # 解密原始文件内容
+                with open(encrypted_file_path, 'rb') as f:
+                    encrypted_data = f.read()
+                
+                old_cipher = AESCipher(old_password)
+                decrypted_data = old_cipher.decrypt(encrypted_data)
+                
+                # 获取对应的元数据文件路径
+                encrypted_filename = os.path.basename(encrypted_file_path)
+                base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
+                metadata_filename = base_uuid + '.meta'
+                metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
+                
+                original_filename = None
+                original_filepath = None
+                creation_time = time.time()
+                
+                if os.path.exists(metadata_path):
+                    try:
+                        # 读取并解密元数据
+                        with open(metadata_path, 'rb') as f:
+                            encrypted_metadata = f.read()
+                        
+                        decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
+                        decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
+                        metadata = json.loads(decrypted_metadata_json)
+                        
+                        original_filename = metadata.get("original_filename", None)
+                        original_filepath = metadata.get("original_filepath", None)
+                        creation_time = metadata.get("creation_time", time.time())
+                    except:
+                        # 如果解密元数据失败，仍然可以继续重新加密文件内容
+                        pass
+                
+                # 使用新密码加密文件内容
+                new_cipher = AESCipher(new_password)
+                new_encrypted_data = new_cipher.encrypt(decrypted_data)
+                
+                # 生成新的混淆的文件名
+                new_encrypted_filename = str(uuid.uuid4()) + '.llaes'
+                new_encrypted_file_path = os.path.join(os.path.dirname(encrypted_file_path), new_encrypted_filename)
+                
+                # 写入新的加密文件
+                with open(new_encrypted_file_path, 'wb') as f:
+                    f.write(new_encrypted_data)
+                
+                # 创建新的加密元数据
+                new_metadata = {
+                    "original_filename": original_filename or file_info['original_name'],
+                    "original_filepath": original_filepath,
+                    "encrypted_filename": new_encrypted_filename,
+                    "creation_time": creation_time
+                }
+                
+                # 序列化新元数据并加密
+                new_metadata_json = json.dumps(new_metadata)
+                new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
+                
+                # 存储新的加密元数据
+                new_base_uuid = os.path.splitext(new_encrypted_filename)[0]  # 获取新UUID部分
+                new_metadata_filename = new_base_uuid + '.meta'
+                new_metadata_path = os.path.join(os.path.dirname(encrypted_file_path), new_metadata_filename)
+                
+                with open(new_metadata_path, 'wb') as f:
+                    f.write(new_encrypted_metadata)
+                
+                # 删除旧的加密文件和元数据文件
+                os.remove(encrypted_file_path)
+                if os.path.exists(metadata_path):
+                    os.remove(metadata_path)
+            
+            # --- NEW: Delete old password and meta files AFTER saving new password and re-encrypting files ---
+            # Delete the old encrypted password file and its corresponding meta file
+            try:
+                if os.path.exists(old_pwd_path):
+                    os.remove(old_pwd_path)
+                if os.path.exists(old_meta_path):
+                    os.remove(old_meta_path)
+            except Exception as e:
+                print(f"删除旧密码文件时发生错误: {str(e)}")  # Use print instead of messagebox for internal errors
+                # Log error but continue
+            # --- END NEW ---
+
+            messagebox.showinfo("成功", "密码修改成功，所有文件已重新加密！")
+            
+            # 刷新列表
+            self.refresh_file_list()
+            
+            # 关闭窗口
+            change_window.destroy()
+            parent_window.destroy()
+        except Exception as e:
+            messagebox.showerror("错误", f"修改密码时发生错误: {str(e)}")
 
 def main():
     # 检查是否已设置密码
