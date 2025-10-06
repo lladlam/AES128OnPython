@@ -1,3 +1,6 @@
+"""
+AES文件加密软件主程序（整合版）
+"""
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
@@ -69,10 +72,10 @@ class AESCipher:
             # 如果解密失败，可能是密码错误
             raise ValueError("密码错误或文件损坏") from e
 
-class StreamCipher:
+
+class ChaCha20Cipher:
     """
-    流式加密解密类，适用于大文件
-    使用ChaCha20-Poly1305算法，支持分块加密解密
+    ChaCha20-Poly1305加密解密类
     """
     
     def __init__(self, password):
@@ -83,220 +86,56 @@ class StreamCipher:
         # 使用SHA-256哈希函数将密码转换为32字节密钥
         self.key = hashlib.sha256(password.encode()).digest()
     
-    def encrypt_stream(self, input_path, output_path, chunk_size=64*1024):
-        """
-        流式加密大文件
-        :param input_path: 输入文件路径
-        :param output_path: 输出文件路径
-        :param chunk_size: 块大小
-        """
-        # 生成随机nonce
-        nonce = get_random_bytes(12)  # ChaCha20-Poly1305需要12字节nonce
-        
-        # 创建加密器
-        cipher = ChaCha20_Poly1305.new(key=self.key, nonce=nonce)
-        
-        # 原子写入加密文件
-        temp_output_path = output_path + '.tmp'
-        
-        with open(input_path, 'rb') as infile, open(temp_output_path, 'wb') as outfile:
-            # 先写入nonce
-            outfile.write(nonce)
-            
-            # 分块处理文件
-            while True:
-                chunk = infile.read(chunk_size)
-                if len(chunk) == 0:
-                    break
-                if len(chunk) % 16 != 0:  # 如果不是16的倍数，需要特殊处理
-                    # ChaCha20-Poly1305不需要填充
-                    pass
-                encrypted_chunk = cipher.encrypt(chunk)
-                outfile.write(encrypted_chunk)
-            
-            # 写入认证标签
-            tag = cipher.digest()
-            outfile.write(tag)
-        
-        # 原子重命名
-        os.replace(temp_output_path, output_path)
-    
-    def decrypt_stream(self, input_path, output_path, chunk_size=64*1024):
-        """
-        流式解密大文件
-        :param input_path: 输入文件路径
-        :param output_path: 输出文件路径
-        :param chunk_size: 块大小
-        """
-        with open(input_path, 'rb') as infile:
-            # 读取nonce（前12字节）
-            nonce = infile.read(12)
-            
-            # 移动到文件末尾前16字节处读取认证标签
-            infile.seek(-16, os.SEEK_END)
-            tag = infile.read(16)
-            
-            # 重新定位到数据开始位置
-            infile.seek(12, os.SEEK_SET)
-            remaining_size = infile.tell() - (os.path.getsize(input_path) - 16)
-            data_size = os.path.getsize(input_path) - 12 - 16  # 排除nonce和tag
-            
-            # 创建解密器
-            cipher = ChaCha20_Poly1305.new(key=self.key, nonce=nonce)
-            
-            # 原子写入解密文件
-            temp_output_path = output_path + '.tmp'
-            
-            with open(temp_output_path, 'wb') as outfile:
-                # 分块处理加密数据
-                bytes_read = 0
-                while bytes_read < data_size:
-                    # 计算当前块大小
-                    current_chunk_size = min(chunk_size, data_size - bytes_read)
-                    chunk = infile.read(current_chunk_size)
-                    
-                    if len(chunk) == 0:
-                        break
-                        
-                    bytes_read += len(chunk)
-                    
-                    # 解密当前块
-                    decrypted_chunk = cipher.decrypt(chunk)
-                    outfile.write(decrypted_chunk)
-                
-                # 验证认证标签
-                try:
-                    cipher.verify(tag)
-                except ValueError as e:
-                    raise ValueError("密码错误或文件损坏") from e
-        
-        # 原子重命名
-        os.replace(temp_output_path, output_path)
-    
     def encrypt(self, plaintext):
         """
-        加密数据（传统方法，用于小数据如元数据）
+        加密数据
         :param plaintext: 待加密的数据
         :return: 加密后的数据 (bytes)
         """
         # 生成随机nonce
-        nonce = get_random_bytes(12)
-        cipher = ChaCha20_Poly1305.new(key=self.key, nonce=nonce)
-        ciphertext = cipher.encrypt(plaintext)
-        tag = cipher.digest()
-        
-        # 将nonce、密文和认证标签一起返回
-        return nonce + ciphertext + tag
+        cipher = ChaCha20_Poly1305.new(key=self.key)
+        ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+        # 将nonce、tag和密文一起返回
+        return cipher.nonce + tag + ciphertext
     
     def decrypt(self, ciphertext):
         """
-        解密数据（传统方法，用于小数据如元数据）
-        :param ciphertext: 待解密的数据，包含nonce、密文和认证标签
+        解密数据
+        :param ciphertext: 待解密的数据，包含nonce、tag和密文
         :return: 解密后的数据 (bytes)
         """
-        # 提取nonce（前12字节）
+        # 提取nonce（12字节）、tag（16字节）和密文
         nonce = ciphertext[:12]
-        # 提取认证标签（后16字节）
-        tag = ciphertext[-16:]
-        # 提取加密数据
-        encrypted_data = ciphertext[12:-16]
+        tag = ciphertext[12:28]  # 16字节tag
+        encrypted_data = ciphertext[28:]
         
         cipher = ChaCha20_Poly1305.new(key=self.key, nonce=nonce)
-        decrypted_data = cipher.decrypt(encrypted_data)
-        
-        # 验证认证标签
         try:
-            cipher.verify(tag)
+            return cipher.decrypt_and_verify(encrypted_data, tag)
         except ValueError as e:
-            # 如果解密失败，可能是密码错误
+            # 如果解密失败，可能是密码错误或数据损坏
             raise ValueError("密码错误或文件损坏") from e
-            
-        return decrypted_data
 
-def reencrypt_file_chunked(encrypted_input_path, decrypted_password, new_encrypted_output_path, new_password, metadata_path, new_metadata_path, chunk_size=8192):
-    """
-    重新加密文件（解密旧文件并使用新密码加密）
-    注意：由于AES加密中IV随机性，我们无法真正分块解密再加密，
-    因此这里仍然需要一次性解密整个文件再加密
-    :param encrypted_input_path: 旧加密文件路径
-    :param decrypted_password: 旧密码
-    :param new_encrypted_output_path: 新加密文件路径
-    :param new_password: 新密码
-    :param metadata_path: 旧元数据路径
-    :param new_metadata_path: 新元数据路径
-    :param chunk_size: 分块大小（仅在将来扩展时使用）
-    """
-    # 读取并解密旧文件
-    with open(encrypted_input_path, 'rb') as f:
-        encrypted_data = f.read()
-    
-    old_cipher = AESCipher(decrypted_password)
-    decrypted_data = old_cipher.decrypt(encrypted_data)
-    
-    # 获取元数据
-    original_filename = None
-    original_filepath = None
-    creation_time = time.time()
-    
-    if os.path.exists(metadata_path):
-        try:
-            # 读取并解密元数据
-            with open(metadata_path, 'rb') as f:
-                encrypted_metadata = f.read()
-            
-            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
-            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-            metadata = json.loads(decrypted_metadata_json)
-            
-            original_filename = metadata.get("original_filename", None)
-            original_filepath = metadata.get("original_filepath", None)
-            creation_time = metadata.get("creation_time", time.time())
-        except:
-            # 如果解密元数据失败，仍然可以继续重新加密文件内容
-            pass
-    
-    # 使用新密码加密文件内容
-    new_cipher = AESCipher(new_password)
-    new_encrypted_data = new_cipher.encrypt(decrypted_data)
-    
-    # 原子写入新的加密文件
-    temp_new_encrypted_path = new_encrypted_output_path + '.tmp'
-    with open(temp_new_encrypted_path, 'wb') as f:
-        f.write(new_encrypted_data)
-    # 原子重命名
-    os.replace(temp_new_encrypted_path, new_encrypted_output_path)
-    
-    # 创建新的加密元数据
-    new_metadata = {
-        "original_filename": original_filename,
-        "original_filepath": original_filepath,
-        "encrypted_filename": os.path.basename(new_encrypted_output_path),
-        "creation_time": creation_time
-    }
-    
-    # 序列化新元数据并加密
-    new_metadata_json = json.dumps(new_metadata)
-    new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
-    
-    # 原子写入新的加密元数据
-    temp_new_metadata_path = new_metadata_path + '.tmp'
-    with open(temp_new_metadata_path, 'wb') as f:
-        f.write(new_encrypted_metadata)
-    # 原子重命名
-    os.replace(temp_new_metadata_path, new_metadata_path)
-
-def encrypt_file(file_path, password, encryption_method=None):
+def encrypt_file(file_path, password, encryption_method="AES-128"):
     """
     加密文件
     :param file_path: 文件路径
     :param password: 密码
-    :param encryption_method: 加密方法，如果为None则从配置中读取
+    :param encryption_method: 加密方式，默认为AES-128
     :return: 加密后文件路径
     """
-    # 获取加密方式
-    if encryption_method is None:
-        config = load_config()
-        encryption_method = config.get("encryption_method", "AES")
+    # 读取原始文件内容
+    with open(file_path, 'rb') as f:
+        file_data = f.read()
+    
+    # 根据加密方式创建加密器
+    if encryption_method == "ChaCha20-Poly1305":
+        cipher = ChaCha20Cipher(password)
+    else:  # 默认使用AES-128
+        cipher = AESCipher(password)
+    
+    # 加密数据
+    encrypted_data = cipher.encrypt(file_data)
     
     # 创建Data目录（如果不存在）
     data_dir = os.path.join(os.path.dirname(__file__), 'Data')
@@ -310,141 +149,32 @@ def encrypt_file(file_path, password, encryption_method=None):
     encrypted_filename = str(uuid.uuid4()) + '.llaes'  # 使用.llaes扩展名
     encrypted_file_path = os.path.join(data_dir, encrypted_filename)
     
-    # 创建加密器
-    cipher = get_cipher(password, encryption_method)
+    # 写入加密文件
+    with open(encrypted_file_path, 'wb') as f:
+        f.write(encrypted_data)
     
-    if encryption_method == "STREAM":
-        # 使用流式加密处理大文件
-        temp_encrypted_file_path = encrypted_file_path + '.tmp'
-        cipher.encrypt_stream(file_path, temp_encrypted_file_path)
-        # 原子重命名
-        os.replace(temp_encrypted_file_path, encrypted_file_path)
-        
-        # 单独加密文件内容，但保存元数据到单独的文件
-        # 首先我们需要临时解密文件以获取内容，但这会导致重复处理
-        # 更好的方式是直接保存元数据
-        metadata_content = {
-            "original_filename": original_filename,
-            "original_filepath": file_path,  # 保留原始路径信息
-            "encrypted_filename": encrypted_filename,
-            "creation_time": time.time(),
-            "encryption_method": encryption_method  # 记录加密方式
-        }
-        
-        # 序列化元数据并加密
-        metadata_json = json.dumps(metadata_content)
-        encrypted_metadata = cipher.encrypt(metadata_json.encode('utf-8'))
-    else:  # 使用AES
-        # 读取原始文件内容
-        with open(file_path, 'rb') as f:
-            file_data = f.read()
-        
-        # 加密数据
-        encrypted_data = cipher.encrypt(file_data)
-        
-        # 原子写入加密文件
-        temp_encrypted_file_path = encrypted_file_path + '.tmp'
-        with open(temp_encrypted_file_path, 'wb') as f:
-            f.write(encrypted_data)
-        # 原子重命名
-        os.replace(temp_encrypted_file_path, encrypted_file_path)
-        
-        # 创建加密的元数据
-        metadata_content = {
-            "original_filename": original_filename,
-            "original_filepath": file_path,  # 保留原始路径信息
-            "encrypted_filename": encrypted_filename,
-            "creation_time": time.time(),
-            "encryption_method": encryption_method  # 记录加密方式
-        }
-        
-        # 序列化元数据并加密
-        metadata_json = json.dumps(metadata_content)
-        encrypted_metadata = cipher.encrypt(metadata_json.encode('utf-8'))
+    # 创建加密的元数据
+    metadata = {
+        "original_filename": original_filename,
+        "original_filepath": file_path,  # 保留原始路径信息
+        "encrypted_filename": encrypted_filename,
+        "encryption_method": encryption_method,  # 记录加密方式
+        "creation_time": time.time()
+    }
+    
+    # 序列化元数据并加密
+    metadata_json = json.dumps(metadata)
+    encrypted_metadata = cipher.encrypt(metadata_json.encode('utf-8'))
     
     # 存储加密的元数据（使用与加密文件相同的UUID但不同扩展名）
     base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
     metadata_filename = base_uuid + '.meta'  # 使用.meta扩展名
     metadata_path = os.path.join(data_dir, metadata_filename)
     
-    # 原子写入元数据文件
-    temp_metadata_path = metadata_path + '.tmp'
-    with open(temp_metadata_path, 'wb') as f:
+    with open(metadata_path, 'wb') as f:
         f.write(encrypted_metadata)
-    # 原子重命名
-    os.replace(temp_metadata_path, metadata_path)
     
     return encrypted_file_path
-
-def reencrypt_file_chunked(encrypted_input_path, decrypted_password, new_encrypted_output_path, new_password, metadata_path, new_metadata_path, chunk_size=8192):
-    """
-    使用分块方式重新加密文件（解密旧文件并使用新密码加密）
-    :param encrypted_input_path: 旧加密文件路径
-    :param decrypted_password: 旧密码
-    :param new_encrypted_output_path: 新加密文件路径
-    :param new_password: 新密码
-    :param metadata_path: 旧元数据路径
-    :param new_metadata_path: 新元数据路径
-    :param chunk_size: 分块大小
-    """
-    # 读取并解密旧文件
-    with open(encrypted_input_path, 'rb') as f:
-        encrypted_data = f.read()
-    
-    old_cipher = AESCipher(decrypted_password)
-    decrypted_data = old_cipher.decrypt(encrypted_data)
-    
-    # 获取元数据
-    original_filename = None
-    original_filepath = None
-    creation_time = time.time()
-    
-    if os.path.exists(metadata_path):
-        try:
-            # 读取并解密元数据
-            with open(metadata_path, 'rb') as f:
-                encrypted_metadata = f.read()
-            
-            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
-            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-            metadata = json.loads(decrypted_metadata_json)
-            
-            original_filename = metadata.get("original_filename", None)
-            original_filepath = metadata.get("original_filepath", None)
-            creation_time = metadata.get("creation_time", time.time())
-        except:
-            # 如果解密元数据失败，仍然可以继续重新加密文件内容
-            pass
-    
-    # 使用新密码加密文件内容
-    new_cipher = AESCipher(new_password)
-    new_encrypted_data = new_cipher.encrypt(decrypted_data)
-    
-    # 原子写入新的加密文件
-    temp_new_encrypted_path = new_encrypted_output_path + '.tmp'
-    with open(temp_new_encrypted_path, 'wb') as f:
-        f.write(new_encrypted_data)
-    # 原子重命名
-    os.replace(temp_new_encrypted_path, new_encrypted_output_path)
-    
-    # 创建新的加密元数据
-    new_metadata = {
-        "original_filename": original_filename,
-        "original_filepath": original_filepath,
-        "encrypted_filename": os.path.basename(new_encrypted_output_path),
-        "creation_time": creation_time
-    }
-    
-    # 序列化新元数据并加密
-    new_metadata_json = json.dumps(new_metadata)
-    new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
-    
-    # 原子写入新的加密元数据
-    temp_new_metadata_path = new_metadata_path + '.tmp'
-    with open(temp_new_metadata_path, 'wb') as f:
-        f.write(new_encrypted_metadata)
-    # 原子重命名
-    os.replace(temp_new_metadata_path, new_metadata_path)
 
 def decrypt_file(encrypted_file_path, password, output_dir=None, output_filename=None, delete_on_success=False):
     """
@@ -456,72 +186,62 @@ def decrypt_file(encrypted_file_path, password, output_dir=None, output_filename
     :param delete_on_success: 解密成功后是否删除加密文件和元数据文件（可选，默认为False）
     :return: 解密后文件路径
     """
+    # 读取加密文件内容
+    with open(encrypted_file_path, 'rb') as f:
+        encrypted_data = f.read()
+    
     # 获取加密的元数据文件路径
     encrypted_filename = os.path.basename(encrypted_file_path)
     base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
     metadata_filename = base_uuid + '.meta'
     metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
     
-    # 从元数据中获取加密方式
-    encryption_method = "AES"  # 默认值
+    # 尝试读取元数据以确定加密方法
+    encryption_method = "AES-128"  # 默认方法
     original_filename = None
+    original_filepath = None
     
     if os.path.exists(metadata_path):
-        # 尝试使用AES解密元数据（向后兼容）
+        # 首先尝试使用AES解密器解密元数据（向后兼容）
+        fallback_cipher = AESCipher(password)
         try:
-            # 读取加密的元数据
             with open(metadata_path, 'rb') as f:
                 encrypted_metadata = f.read()
             
-            # 尝试AES解密
-            aes_cipher = AESCipher(password)
-            decrypted_metadata_bytes = aes_cipher.decrypt(encrypted_metadata)
+            decrypted_metadata_bytes = fallback_cipher.decrypt(encrypted_metadata)
             decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
             metadata = json.loads(decrypted_metadata_json)
             
             original_filename = metadata.get("original_filename", None)
-            encryption_method = metadata.get("encryption_method", "AES")
+            original_filepath = metadata.get("original_filepath", None)
+            encryption_method = metadata.get("encryption_method", "AES-128")  # 获取加密方式
         except:
-            # 如果AES解密失败，尝试流式解密
+            # 如果AES解密失败，尝试使用ChaCha20解密器
             try:
-                stream_cipher = StreamCipher(password)
-                decrypted_metadata_bytes = stream_cipher.decrypt(encrypted_metadata)
+                chacha_cipher = ChaCha20Cipher(password)
+                with open(metadata_path, 'rb') as f:
+                    encrypted_metadata = f.read()
+                
+                decrypted_metadata_bytes = chacha_cipher.decrypt(encrypted_metadata)
                 decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
                 metadata = json.loads(decrypted_metadata_json)
                 
                 original_filename = metadata.get("original_filename", None)
-                encryption_method = metadata.get("encryption_method", "STREAM")
+                original_filepath = metadata.get("original_filepath", None)
+                encryption_method = metadata.get("encryption_method", "AES-128")  # 获取加密方式
             except:
-                # 如果两种方式都失败，则认为密码错误或文件损坏
-                raise ValueError("密码错误或元数据文件损坏")
+                # 如果所有解密方法都失败，只使用文件内容解密
+                original_filename = None
+                encryption_method = "AES-128"  # 使用默认方法尝试
     
-    # 创建相应类型的解密器
-    cipher = get_cipher(password, encryption_method)
+    # 根据加密方法创建相应的解密器
+    if encryption_method == "ChaCha20-Poly1305":
+        cipher = ChaCha20Cipher(password)
+    else:  # 默认使用AES-128
+        cipher = AESCipher(password)
     
-    # 根据加密方式解密文件
-    if encryption_method == "STREAM":
-        # 使用临时文件进行流式解密
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False) as temp_output:
-            temp_output_path = temp_output.name
-        
-        try:
-            # 执行流式解密
-            cipher.decrypt_stream(encrypted_file_path, temp_output_path)
-            # 读取解密后的内容
-            with open(temp_output_path, 'rb') as f:
-                decrypted_data = f.read()
-        finally:
-            # 删除临时解密文件
-            if os.path.exists(temp_output_path):
-                os.remove(temp_output_path)
-    else:  # AES
-        # 读取加密文件内容
-        with open(encrypted_file_path, 'rb') as f:
-            encrypted_data = f.read()
-        
-        # 解密数据
-        decrypted_data = cipher.decrypt(encrypted_data)
+    # 解密数据
+    decrypted_data = cipher.decrypt(encrypted_data)
     
     # 确定输出目录
     if output_dir is None:
@@ -546,12 +266,9 @@ def decrypt_file(encrypted_file_path, password, output_dir=None, output_filename
         decrypted_filename = "decrypted_" + base_name + "_restored"
         decrypted_file_path = os.path.join(output_dir, decrypted_filename)
     
-    # 原子写入解密文件
-    temp_decrypted_file_path = decrypted_file_path + '.tmp'
-    with open(temp_decrypted_file_path, 'wb') as f:
+    # 写入解密文件
+    with open(decrypted_file_path, 'wb') as f:
         f.write(decrypted_data)
-    # 原子重命名
-    os.replace(temp_decrypted_file_path, decrypted_file_path)
     
     # 如果启用了成功后删除功能
     if delete_on_success:
@@ -617,35 +334,38 @@ def get_encrypted_files_list(password):
             metadata_path = os.path.join(data_dir, metadata_filename)
             
             original_filename = "未知文件"
-            encryption_method = "AES"  # 默认值
+            encryption_method = "AES-128"  # 默认方法
             
             if os.path.exists(metadata_path):
-                # 尝试使用AES解密元数据（向后兼容）
+                # 首先尝试使用AES解密器解密元数据（向后兼容）
+                fallback_cipher = AESCipher(password)
                 try:
                     # 读取加密的元数据
                     with open(metadata_path, 'rb') as f:
                         encrypted_metadata = f.read()
                     
-                    # 尝试AES解密
-                    aes_cipher = AESCipher(password)
-                    decrypted_metadata_bytes = aes_cipher.decrypt(encrypted_metadata)
+                    # 解密元数据
+                    decrypted_metadata_bytes = fallback_cipher.decrypt(encrypted_metadata)
                     decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
                     metadata = json.loads(decrypted_metadata_json)
                     
                     original_filename = metadata.get("original_filename", "未知文件")
-                    encryption_method = metadata.get("encryption_method", "AES")
+                    encryption_method = metadata.get("encryption_method", "AES-128")
                 except:
-                    # 如果AES解密失败，尝试流式解密
+                    # 如果AES解密失败，尝试使用ChaCha20解密器
                     try:
-                        stream_cipher = StreamCipher(password)
-                        decrypted_metadata_bytes = stream_cipher.decrypt(encrypted_metadata)
+                        chacha_cipher = ChaCha20Cipher(password)
+                        with open(metadata_path, 'rb') as f:
+                            encrypted_metadata = f.read()
+                        
+                        decrypted_metadata_bytes = chacha_cipher.decrypt(encrypted_metadata)
                         decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
                         metadata = json.loads(decrypted_metadata_json)
                         
                         original_filename = metadata.get("original_filename", "未知文件")
-                        encryption_method = metadata.get("encryption_method", "STREAM")
+                        encryption_method = metadata.get("encryption_method", "AES-128")
                     except:
-                        # 如果两种方式都失败，则标记为解密失败
+                        # 如果所有解密方法都失败，仍显示为未知文件
                         original_filename = "未知文件 (元数据解密失败)"
             
             # 获取文件大小
@@ -673,69 +393,55 @@ def view_encrypted_file(encrypted_file_path, password):
     :return: 解密后的文本内容
     """
     try:
-        # 获取加密的元数据文件路径以确定加密方式
+        # 读取加密文件内容
+        with open(encrypted_file_path, 'rb') as f:
+            encrypted_data = f.read()
+        
+        # 获取加密文件的元数据以确定加密方法
         encrypted_filename = os.path.basename(encrypted_file_path)
         base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
         metadata_filename = base_uuid + '.meta'
         metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
         
-        # 从元数据中获取加密方式
-        encryption_method = "AES"  # 默认值
+        encryption_method = "AES-128"  # 默认方法
         
+        # 尝试读取元数据以确定加密方法
         if os.path.exists(metadata_path):
-            # 尝试使用AES解密元数据（向后兼容）
+            # 首先尝试使用AES解密器解密元数据（向后兼容）
+            fallback_cipher = AESCipher(password)
             try:
-                # 读取加密的元数据
                 with open(metadata_path, 'rb') as f:
                     encrypted_metadata = f.read()
                 
-                # 尝试AES解密
-                aes_cipher = AESCipher(password)
-                decrypted_metadata_bytes = aes_cipher.decrypt(encrypted_metadata)
+                decrypted_metadata_bytes = fallback_cipher.decrypt(encrypted_metadata)
                 decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
                 metadata = json.loads(decrypted_metadata_json)
                 
-                encryption_method = metadata.get("encryption_method", "AES")
+                encryption_method = metadata.get("encryption_method", "AES-128")
             except:
-                # 如果AES解密失败，尝试流式解密
+                # 如果AES解密失败，尝试使用ChaCha20解密器
                 try:
-                    stream_cipher = StreamCipher(password)
-                    decrypted_metadata_bytes = stream_cipher.decrypt(encrypted_metadata)
+                    chacha_cipher = ChaCha20Cipher(password)
+                    with open(metadata_path, 'rb') as f:
+                        encrypted_metadata = f.read()
+                    
+                    decrypted_metadata_bytes = chacha_cipher.decrypt(encrypted_metadata)
                     decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
                     metadata = json.loads(decrypted_metadata_json)
                     
-                    encryption_method = metadata.get("encryption_method", "STREAM")
+                    encryption_method = metadata.get("encryption_method", "AES-128")
                 except:
-                    # 如果两种方式都失败，则认为密码错误或文件损坏
-                    return "密码错误或元数据文件损坏"
+                    # 如果所有解密方法都失败，使用默认方法
+                    encryption_method = "AES-128"
         
-        # 创建相应类型的解密器
-        cipher = get_cipher(password, encryption_method)
+        # 根据加密方法创建相应的解密器
+        if encryption_method == "ChaCha20-Poly1305":
+            cipher = ChaCha20Cipher(password)
+        else:  # 默认使用AES-128
+            cipher = AESCipher(password)
         
-        # 根据加密方式解密文件
-        if encryption_method == "STREAM":
-            # 使用临时文件进行流式解密
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False) as temp_output:
-                temp_output_path = temp_output.name
-            
-            try:
-                # 执行流式解密
-                cipher.decrypt_stream(encrypted_file_path, temp_output_path)
-                # 读取解密后的内容
-                with open(temp_output_path, 'rb') as f:
-                    decrypted_data = f.read()
-            finally:
-                # 删除临时解密文件
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
-        else:  # AES
-            # 读取加密文件内容
-            with open(encrypted_file_path, 'rb') as f:
-                encrypted_data = f.read()
-            
-            # 解密数据
-            decrypted_data = cipher.decrypt(encrypted_data)
+        # 解密数据
+        decrypted_data = cipher.decrypt(encrypted_data)
         
         # 检查是否需要使用临时文件
         available_memory = get_available_memory()
@@ -774,65 +480,6 @@ def view_encrypted_file(encrypted_file_path, password):
 
 
 # ===============
-# 配置管理功能
-# ===============
-
-# 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
-
-def load_config():
-    """
-    加载配置
-    """
-    default_config = {
-        "show_version": True,  # 默认显示版本号
-        "copy_encrypted_file": False,  # 默认复制解密后的文件
-        "encryption_method": "AES"  # 默认使用AES加密
-    }
-    
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                # 确保配置包含所有必需的键
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                return config
-        except Exception:
-            pass  # 如果配置文件损坏，使用默认配置
-    
-    return default_config
-
-def save_config(config):
-    """
-    保存配置
-    """
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        print(f"保存配置失败: {e}")
-        return False
-
-def get_cipher(password, encryption_method=None):
-    """
-    根据配置获取相应的加密器
-    :param password: 密码
-    :param encryption_method: 加密方法，如果为None则从配置中读取
-    :return: 加密器实例
-    """
-    if encryption_method is None:
-        config = load_config()
-        encryption_method = config.get("encryption_method", "AES")
-    
-    if encryption_method == "STREAM":
-        return StreamCipher(password)
-    else:  # 默认使用AES
-        return AESCipher(password)
-
-# ===============
 # 密码管理功能
 # ===============
 
@@ -842,6 +489,7 @@ DATA_DIR = os.path.abspath(DATA_DIR)
 
 # 加密密码文件名（固定名称，但内容加密）
 ENCRYPTED_PASSWORD_FILE = os.path.join(DATA_DIR, 'master_pwd.dat')
+
 
 def _get_key_from_password(password):
     """根据密码生成加密密钥"""
@@ -891,12 +539,9 @@ def save_password(password):
     global ENCRYPTED_PASSWORD_FILE
     ENCRYPTED_PASSWORD_FILE = os.path.join(DATA_DIR, encrypted_filename)
     
-    # 原子写入密码文件
-    temp_pwd_path = ENCRYPTED_PASSWORD_FILE + '.tmp'
-    with open(temp_pwd_path, 'wb') as f:
+    # 保存加密的密码数据
+    with open(ENCRYPTED_PASSWORD_FILE, 'wb') as f:
         f.write(encrypted_data)
-    # 原子重命名
-    os.replace(temp_pwd_path, ENCRYPTED_PASSWORD_FILE)
     
     # 创建一个元数据文件，记录密码文件的真实名称（也加密存储）
     metadata = {"filename": encrypted_filename}
@@ -906,12 +551,8 @@ def save_password(password):
     metadata_filename = str(uuid.uuid4()) + '.meta'
     metadata_path = os.path.join(DATA_DIR, metadata_filename)
     
-    # 原子写入元数据文件
-    temp_meta_path = metadata_path + '.tmp'
-    with open(temp_meta_path, 'wb') as f:
+    with open(metadata_path, 'wb') as f:
         f.write(encrypted_metadata)
-    # 原子重命名
-    os.replace(temp_meta_path, metadata_path)
 
 def verify_password(input_password):
     """
@@ -1145,11 +786,21 @@ class FileEncryptionApp:
         self.root = root
         self.master_password = master_password
         
-        self.root.title("AES-128文件加密器")
-        self.root.geometry("800x600")
+        # 版本号变量
+        self.version = "2.4.0-beta2.1"
         
-        # 加载配置
-        self.config = load_config()
+        # 初始化设置值（从配置或使用默认值）
+        self.encryption_method = "AES-128"  # 默认加密方式
+        self.show_version = True  # 默认显示版本号
+        self.copy_option = "decrypted"  # 默认复制解密文件
+        
+        # 设置窗口标题
+        if self.show_version:
+            self.root.title(f"AES-128文件加密器 v{self.version}")
+        else:
+            self.root.title("AES-128文件加密器")
+        
+        self.root.geometry("800x600")
         
         # 当前选中的加密文件
         self.selected_encrypted_file = None
@@ -1162,8 +813,6 @@ class FileEncryptionApp:
             self.root.dnd_bind('<<Drop>>', self.on_drop)
         
         self.setup_ui()
-        # 根据配置设置版本号显示
-        self.update_version_label_visibility()
         # 刷新文件列表
         self.refresh_file_list()
     
@@ -1176,7 +825,11 @@ class FileEncryptionApp:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # 标题
-        title_label = ttk.Label(main_frame, text="AES-128文件加密器", font=("Arial", 16, "bold"))
+        if self.show_version:
+            title_text = f"AES-128文件加密器 v{self.version}"
+        else:
+            title_text = "AES-128文件加密器"
+        title_label = ttk.Label(main_frame, text=title_text, font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, columnspan=4, pady=10)
         
         # 按钮框架
@@ -1235,6 +888,16 @@ class FileEncryptionApp:
         
         # 绑定右键单击事件以显示上下文菜单
         self.file_tree.bind("<Button-3>", self.show_context_menu)  # Button-3 代表右键
+        
+        # 绑定鼠标左键按下事件用于拖拽解密
+        self.file_tree.bind("<Button-1>", self.on_file_click)
+        # 绑定鼠标移动事件用于检测拖拽操作
+        self.file_tree.bind("<B1-Motion>", self.on_drag_start)
+        # 绑定鼠标释放事件
+        self.file_tree.bind("<ButtonRelease-1>", self.on_drag_end)
+        
+        # 添加拖拽状态变量
+        self.drag_data = {"x": 0, "y": 0, "item": None}
 
         # 配置列表框架的权重
         list_frame.columnconfigure(0, weight=1)
@@ -1256,541 +919,29 @@ class FileEncryptionApp:
         # 设置按钮靠右对齐
         button_frame.columnconfigure(0, weight=1)  # 给第一个按钮左边留出空间
 
+        # 添加版权信息标签
+        copyright_label = ttk.Label(main_frame, text="AES128OnPython 许可证基于MIT", 
+                                   font=("Arial", 8), foreground="gray")
+        copyright_label.grid(row=5, column=0, columnspan=4, sticky=(tk.S+tk.E), padx=5, pady=5)
+
         # 添加拖拽功能提示标签（如果支持拖拽）
         if HAS_DND:
             dnd_label = ttk.Label(main_frame, text="提示: 您可以直接将文件拖拽到此窗口进行加密", 
                                  font=("Arial", 9), foreground="blue")
-            dnd_label.grid(row=5, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=5)
+            dnd_label.grid(row=5, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
+            
+            drag_decrypt_label = ttk.Label(main_frame, text="提示: 您可以在加密文件列表上右键选择'拖拽解密'来解密并删除文件", 
+                                 font=("Arial", 9), foreground="green")
+            drag_decrypt_label.grid(row=6, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
         else:
             dnd_label = ttk.Label(main_frame, text="提示: 安装tkinterdnd2库以启用拖拽加密功能", 
                                  font=("Arial", 9), foreground="orange")
-            dnd_label.grid(row=5, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=5)
-
-        # 添加版权信息和版本号框架
-        bottom_frame = ttk.Frame(main_frame)
-        bottom_frame.grid(row=6, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
-        # 添加版权信息标签
-        copyright_label = ttk.Label(bottom_frame, text="AES128OnPython 许可证基于MIT", 
-                                   font=("Arial", 8), foreground="gray")
-        copyright_label.grid(row=0, column=0, sticky=tk.W)
-        
-        # 添加版本号标签 (V2.4-beta2)
-        self.version_label = ttk.Label(bottom_frame, text="V2.4-beta2", 
-                                      font=("Arial", 8), foreground="gray")
-        self.version_label.grid(row=0, column=1, sticky=tk.E)
-        
-        # 配置bottom_frame列权重，使版权信息扩展，版本号靠右
-        bottom_frame.columnconfigure(0, weight=1)
-
-        # 配置main_frame行权重，确保底部标签显示
-        main_frame.rowconfigure(6, weight=0)  # 版权信息和版本号行不扩展
+            dnd_label.grid(row=5, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
+            
+            drag_decrypt_label = ttk.Label(main_frame, text="提示: 您可以在加密文件列表上右键选择'拖拽解密'来解密并删除文件", 
+                                 font=("Arial", 9), foreground="green")
+            drag_decrypt_label.grid(row=6, column=0, columnspan=4, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
     
-    def update_version_label_visibility(self):
-        """
-        根据配置更新版本号标签的可见性
-        """
-        if self.config.get("show_version", True):
-            # 显示版本号 - 使用sticky使标签正确对齐
-            self.version_label.grid(row=0, column=1, sticky=tk.E)
-        else:
-            # 隐藏版本号
-            self.version_label.grid_remove()
-    
-    def toggle_version_display(self, show_version):
-        """
-        切换版本号显示
-        """
-        # 更新配置
-        self.config["show_version"] = show_version
-        # 保存配置到文件
-        save_config(self.config)
-        # 更新界面
-        self.update_version_label_visibility()
-    
-    def toggle_copy_encrypted_setting(self, copy_encrypted):
-        """
-        切换复制加密文件设置
-        """
-        # 更新配置
-        self.config["copy_encrypted_file"] = copy_encrypted
-        # 保存配置到文件
-        save_config(self.config)
-    
-    def show_context_menu(self, event):
-        """
-        显示右键菜单
-        """
-        # 获取右键点击位置的项目
-        item_id = self.file_tree.identify_row(event.y)
-        if item_id:
-            # 选中该项目，以便删除操作作用于正确的文件
-            self.file_tree.selection_set(item_id)
-            self.on_file_select(None)  # 更新 self.selected_encrypted_file
-
-            # 创建上下文菜单
-            context_menu = tk.Menu(self.root, tearoff=0)
-            context_menu.add_command(label="复制文件", command=self.copy_selected_file)
-            context_menu.add_command(label="删除文件", command=self.delete_selected_file)
-
-            # 在鼠标位置显示菜单
-            try:
-                context_menu.tk_popup(event.x_root, event.y_root)
-            finally:
-                context_menu.grab_release()  # 确保菜单在点击后消失
-
-    def copy_selected_file(self):
-        """
-        复制选中的加密文件到剪贴板
-        根据配置决定复制加密文件还是解密后的文件
-        """
-        if not self.selected_encrypted_file:
-            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
-            return
-
-        try:
-            # 根据配置决定复制加密文件还是解密后的文件
-            if self.config.get("copy_encrypted_file", False):
-                # 复制加密文件
-                self.copy_encrypted_file_to_clipboard(self.selected_encrypted_file)
-            else:
-                # 复制解密后的文件
-                self.copy_decrypted_file_to_clipboard(self.selected_encrypted_file)
-        except Exception as e:
-            messagebox.showerror("复制失败", f"复制文件时发生错误: {str(e)}")
-    
-    def copy_encrypted_file_to_clipboard(self, encrypted_file_path):
-        """
-        将加密文件复制到Windows剪贴板
-        """
-        try:
-            # 创建临时文件来存放加密文件的副本
-            filename = os.path.basename(encrypted_file_path)
-            import tempfile
-            temp_dir = tempfile.gettempdir()
-            temp_path = os.path.join(temp_dir, filename)
-            
-            # 为临时文件名添加唯一性，以防重名
-            counter = 1
-            original_temp_path = temp_path
-            while os.path.exists(temp_path):
-                name, ext = os.path.splitext(original_temp_path)
-                temp_path = f"{name}_{counter}{ext}"
-                counter += 1
-            
-            # 复制加密文件到临时位置
-            shutil.copy2(encrypted_file_path, temp_path)
-            
-            # 调用外部命令将文件路径写入剪贴板（在Windows上）
-            import subprocess
-            
-            # 创建一个包含文件路径的临时文件
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-                f.write(temp_path)
-                temp_list_file = f.name
-            
-            # 使用PowerShell命令将文件路径放入剪贴板
-            try:
-                # 在PowerShell中执行将文件路径列表放入剪贴板的命令
-                ps_command = f'Get-Content "{temp_list_file}" | Set-Clipboard'
-                subprocess.run(['powershell', '-Command', ps_command], check=True)
-                
-                # 同时执行将文件本身放入剪贴板的特殊命令
-                # 使用PowerShell和COM对象将文件路径放入剪贴板
-                ps_script = f'''
-                Add-Type -AssemblyName System.Windows.Forms
-                $fileDropList = New-Object System.Collections.Specialized.StringCollection
-                $fileDropList.Add('{temp_path.replace(os.sep, "/")}')
-                [System.Windows.Forms.Clipboard]::SetFileDropList($fileDropList)
-                '''
-                subprocess.run(['powershell', '-Command', ps_script], check=True, capture_output=True)
-                
-                self.result_text.delete(1.0, tk.END)
-                self.result_text.insert(tk.END, f"已将加密文件复制到剪贴板: {filename}\\n")
-                messagebox.showinfo("成功", f"已将加密文件复制到剪贴板: {filename}")
-            except subprocess.CalledProcessError:
-                # 如果PowerShell方法失败，使用另一种方法
-                # 使用系统命令行将路径复制到剪贴板
-                os.system(f'echo {temp_path} | clip')
-                
-                self.result_text.delete(1.0, tk.END)
-                self.result_text.insert(tk.END, f"已将加密文件路径复制到剪贴板: {filename}\\n（使用备选方法）")
-                messagebox.showinfo("成功", f"已将加密文件路径复制到剪贴板: {filename}")
-            finally:
-                # 清理临时文件
-                try:
-                    os.unlink(temp_list_file)
-                except:
-                    pass
-            
-        except Exception as e:
-            messagebox.showerror("复制失败", f"复制加密文件时发生错误: {str(e)}")
-    
-    def copy_decrypted_file_to_clipboard(self, encrypted_file_path):
-        """
-        将解密后的文件复制到Windows剪贴板
-        """
-        try:
-            # 获取原始文件名（从元数据中）
-            encrypted_filename = os.path.basename(encrypted_file_path)
-            base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
-            metadata_filename = base_uuid + '.meta'
-            metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
-            
-            original_filename = "decrypted_file"
-            encryption_method = "AES"  # 默认值
-            
-            if os.path.exists(metadata_path):
-                # 尝试使用AES解密元数据（向后兼容）
-                try:
-                    # 读取加密的元数据
-                    with open(metadata_path, 'rb') as f:
-                        encrypted_metadata = f.read()
-                    
-                    # 尝试AES解密
-                    aes_cipher = AESCipher(self.master_password)
-                    decrypted_metadata_bytes = aes_cipher.decrypt(encrypted_metadata)
-                    decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-                    metadata = json.loads(decrypted_metadata_json)
-                    
-                    original_filename = metadata.get("original_filename", "decrypted_file")
-                    encryption_method = metadata.get("encryption_method", "AES")
-                except:
-                    # 如果AES解密失败，尝试流式解密
-                    try:
-                        stream_cipher = StreamCipher(self.master_password)
-                        decrypted_metadata_bytes = stream_cipher.decrypt(encrypted_metadata)
-                        decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-                        metadata = json.loads(decrypted_metadata_json)
-                        
-                        original_filename = metadata.get("original_filename", "decrypted_file")
-                        encryption_method = metadata.get("encryption_method", "STREAM")
-                    except:
-                        # 如果两种方式都失败，使用默认值
-                        original_filename = "decrypted_file"
-            
-            # 创建相应类型的解密器
-            cipher = get_cipher(self.master_password, encryption_method)
-            
-            # 根据加密方式解密文件
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False) as temp_output:
-                temp_output_path = temp_output.name
-            
-            try:
-                if encryption_method == "STREAM":
-                    # 执行流式解密
-                    cipher.decrypt_stream(encrypted_file_path, temp_output_path)
-                else:  # AES
-                    # 读取加密文件内容
-                    with open(encrypted_file_path, 'rb') as f:
-                        encrypted_data = f.read()
-                    
-                    # 解密数据
-                    decrypted_data = cipher.decrypt(encrypted_data)
-                    
-                    # 原子写入解密文件到临时位置
-                    temp_file_path = temp_output_path + '.tmp'
-                    with open(temp_file_path, 'wb') as f:
-                        f.write(decrypted_data)
-                    # 原子重命名
-                    os.replace(temp_file_path, temp_output_path)
-                
-                # 检查目标临时文件是否存在且包含数据
-                if not os.path.exists(temp_output_path):
-                    raise Exception("解密失败：未生成临时文件")
-                
-                # 调用外部命令将文件路径写入剪贴板（在Windows上）
-                import subprocess
-                
-                # 创建一个包含文件路径的临时文件
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-                    f.write(temp_output_path)
-                    temp_list_file = f.name
-                
-                # 使用PowerShell命令将文件路径放入剪贴板
-                try:
-                    # 在PowerShell中执行将文件路径列表放入剪贴板的命令
-                    ps_command = f'Get-Content "{temp_list_file}" | Set-Clipboard'
-                    subprocess.run(['powershell', '-Command', ps_command], check=True)
-                    
-                    # 同时执行将文件本身放入剪贴板的特殊命令
-                    # 使用PowerShell和COM对象将文件路径放入剪贴板
-                    ps_script = f'''
-                    Add-Type -AssemblyName System.Windows.Forms
-                    $fileDropList = New-Object System.Collections.Specialized.StringCollection
-                    $fileDropList.Add('{temp_output_path.replace(os.sep, "/")}')
-                    [System.Windows.Forms.Clipboard]::SetFileDropList($fileDropList)
-                    '''
-                    subprocess.run(['powershell', '-Command', ps_script], check=True, capture_output=True)
-                    
-                    self.result_text.delete(1.0, tk.END)
-                    self.result_text.insert(tk.END, f"已将解密文件复制到剪贴板: {original_filename}\n")
-                    messagebox.showinfo("成功", f"已将解密文件复制到剪贴板: {original_filename}")
-                except subprocess.CalledProcessError:
-                    # 如果PowerShell方法失败，使用另一种方法
-                    # 使用系统命令行将路径复制到剪贴板
-                    os.system(f'echo {temp_output_path} | clip')
-                    
-                    self.result_text.delete(1.0, tk.END)
-                    self.result_text.insert(tk.END, f"已将解密文件路径复制到剪贴板: {original_filename}\n（使用备选方法）")
-                    messagebox.showinfo("成功", f"已将解密文件路径复制到剪贴板: {original_filename}")
-                finally:
-                    # 清理临时文件
-                    try:
-                        os.unlink(temp_list_file)
-                        os.unlink(temp_output_path)  # 也要清理临时解密文件
-                    except:
-                        pass
-            except Exception as e:
-                # 确保临时文件被清理
-                try:
-                    if os.path.exists(temp_output_path):
-                        os.remove(temp_output_path)
-                except:
-                    pass
-                raise e
-            
-        except Exception as e:
-            messagebox.showerror("复制失败", f"复制解密文件时发生错误: {str(e)}")
-
-    def add_file(self):
-        """
-        添加文件进行加密
-        """
-        file_paths = filedialog.askopenfilenames(title="选择要加密的文件")
-        
-        if not file_paths:
-            return
-        
-        # 获取当前配置的加密方式
-        encryption_method = self.config.get("encryption_method", "AES")
-        
-        success_count = 0
-        for file_path in file_paths:
-            try:
-                encrypted_path = encrypt_file(file_path, self.master_password, encryption_method)
-                self.result_text.insert(tk.END, f"文件加密成功: {file_path} -> {encrypted_path}\\n")
-                success_count += 1
-            except Exception as e:
-                self.result_text.insert(tk.END, f"文件加密失败 {file_path}: {str(e)}\\n")
-        
-        self.result_text.see(tk.END)
-        messagebox.showinfo("完成", f"已处理 {len(file_paths)} 个文件，其中 {success_count} 个加密成功")
-        
-        # 刷新文件列表
-        self.refresh_file_list()
-
-    def decrypt_selected_file(self):
-        """
-        解密选中的文件
-        """
-        if not self.selected_encrypted_file:
-            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
-            return
-
-        # 询问输出目录
-        output_dir = filedialog.askdirectory(title="选择解密文件保存目录")
-        if not output_dir:
-            return
-
-        try:
-            # 解密文件
-            decrypted_path = decrypt_file(self.selected_encrypted_file, self.master_password, output_dir=output_dir)
-            
-            # 显示结果
-            self.result_text.insert(tk.END, f"文件解密成功: {self.selected_encrypted_file} -> {decrypted_path}\\n")
-            self.result_text.see(tk.END)
-            
-            messagebox.showinfo("成功", f"文件解密成功！\\n解密后文件路径: {decrypted_path}")
-        except ValueError as e:
-            # 密码错误
-            messagebox.showerror("解密失败", f"密码错误或文件损坏: {str(e)}")
-        except Exception as e:
-            messagebox.showerror("解密失败", f"解密过程中发生错误: {str(e)}")
-
-    def on_file_select(self, event):
-        """
-        处理文件选择事件
-        """
-        selection = self.file_tree.selection()
-        if selection:
-            item = self.file_tree.item(selection[0])
-            # 获取加密文件路径
-            encrypted_filename = item['values'][1]  # 加密文件名在第二列
-            data_dir = os.path.join(os.path.dirname(__file__), 'Data')
-            self.selected_encrypted_file = os.path.join(data_dir, encrypted_filename)
-        else:
-            self.selected_encrypted_file = None
-
-    def refresh_file_list(self):
-        """
-        刷新加密文件列表
-        """
-        # 清空现有项目
-        for item in self.file_tree.get_children():
-            self.file_tree.delete(item)
-        
-        try:
-            # 获取加密文件列表
-            encrypted_files = get_encrypted_files_list(self.master_password)
-            
-            # 添加到树视图
-            for file_info in encrypted_files:
-                # 格式化文件大小
-                size_str = f"{file_info['size']} 字节"
-                if file_info['size'] > 1024:
-                    size_str = f"{file_info['size']/1024:.2f} KB"
-                if file_info['size'] > 1024*1024:
-                    size_str = f"{file_info['size']/(1024*1024):.2f} MB"
-                
-                # 格式化修改时间
-                mod_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(file_info['mod_time']))
-                
-                self.file_tree.insert('', 'end', values=(
-                    file_info['original_name'],
-                    file_info['encrypted_name'],
-                    size_str,
-                    mod_time_str
-                ))
-        except Exception as e:
-            messagebox.showerror("错误", f"刷新文件列表时发生错误: {str(e)}")
-
-    def view_selected_file(self):
-        import tempfile
-        import time
-        import uuid
-        
-        # 生成临时文件名以避免冲突
-        timestamp = str(int(time.time() * 1000))  # 毫秒级时间戳
-        original_filename = os.path.basename(self.selected_encrypted_file)
-        # 获取原文件扩展名
-        _, ext = os.path.splitext(original_filename)
-        temp_filename = f"temp_{timestamp}_{os.path.basename(original_filename)}_{uuid.uuid4().hex[:8]}{ext}"
-        
-        # 使用临时目录存储临时文件
-        temp_file_path = os.path.join(tempfile.gettempdir(), temp_filename)
-        
-        # 临时文件管理：使用 try/finally 确保文件会被删除
-        temp_file_created = False
-        try:
-            # 使用当前主密码解密文件到临时位置
-            with open(self.selected_encrypted_file, 'rb') as f:
-                encrypted_data = f.read()
-            
-            cipher = AESCipher(self.master_password)
-            decrypted_data = cipher.decrypt(encrypted_data)
-            
-            # 原子写入临时文件
-            temp_path_with_suffix = temp_file_path + '.tmp'
-            with open(temp_path_with_suffix, 'wb') as f:
-                f.write(decrypted_data)
-            
-            # 原子重命名
-            os.replace(temp_path_with_suffix, temp_file_path)
-            temp_file_created = True
-            
-            # 在系统默认程序中打开临时文件
-            os.startfile(temp_file_path)  # Windows系统
-            
-            # 在结果区域显示信息
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, f"文件已临时解密到: {temp_file_path}\n")
-            self.result_text.insert(tk.END, "文件将在后台自动删除。\n")
-            
-        except Exception as e:
-            messagebox.showerror("查看失败", f"发生错误: {str(e)}")
-            # 如果创建了临时文件但在打开时出错，确保删除临时文件
-            if temp_file_created and os.path.exists(temp_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except:
-                    pass  # 即使删除失败也不影响错误提示
-        finally:
-            # 启动后台线程在一段时间后删除临时文件
-            # 这里使用 after 方法在GUI线程中安排删除任务
-            self.root.after(10000, lambda: self._safely_delete_file(temp_file_path))  # 10秒后删除
-
-    def _safely_delete_file(self, file_path):
-        """
-        安全删除文件的辅助方法
-        """
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                self.result_text.insert(tk.END, f"\n临时文件已删除: {file_path}")
-        except Exception as e:
-            # 记录删除失败，但不显示给用户
-            print(f"删除临时文件失败 {file_path}: {str(e)}")
-
-    def delete_selected_file(self):
-        """
-        删除选中的加密文件及其元数据
-        """
-        if not self.selected_encrypted_file:
-            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
-            return
-
-        if messagebox.askyesno("确认删除", f"确定要删除加密文件吗？\\n{self.selected_encrypted_file}"):
-            try:
-                # 删除加密文件
-                os.remove(self.selected_encrypted_file)
-                
-                # 删除对应的元数据文件
-                encrypted_filename = os.path.basename(self.selected_encrypted_file)
-                base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
-                metadata_filename = base_uuid + '.meta'
-                metadata_path = os.path.join(os.path.dirname(self.selected_encrypted_file), metadata_filename)
-                
-                if os.path.exists(metadata_path):
-                    os.remove(metadata_path)
-                
-                # 删除对应的密码文件（如果存在，且没有其他文件依赖它）
-                pwd_filename = base_uuid + '.pwd'
-                pwd_path = os.path.join(os.path.dirname(self.selected_encrypted_file), pwd_filename)
-                
-                if os.path.exists(pwd_path):
-                    os.remove(pwd_path)
-                
-                self.result_text.insert(tk.END, f"已删除文件: {self.selected_encrypted_file}\\n")
-                self.result_text.see(tk.END)
-                
-                # 从列表中移除该项目
-                for item in self.file_tree.get_children():
-                    values = self.file_tree.item(item)['values']
-                    if values[1] == encrypted_filename:  # 根据加密文件名匹配
-                        self.file_tree.delete(item)
-                        break
-                
-                messagebox.showinfo("成功", "文件已删除")
-            except Exception as e:
-                messagebox.showerror("删除失败", f"删除文件时发生错误: {str(e)}")
-
-    def on_drop(self, event):
-        """
-        处理文件拖拽事件
-        """
-        if HAS_DND:
-            # 获取拖拽的文件路径
-            files = self.root.tk.splitlist(event.data)
-            
-            success_count = 0
-            for file_path in files:
-                try:
-                    # 确保路径是有效的文件
-                    if os.path.isfile(file_path):
-                        encrypted_path = encrypt_file(file_path, self.master_password)
-                        self.result_text.insert(tk.END, f"文件加密成功: {file_path} -> {encrypted_path}\\n")
-                        success_count += 1
-                except Exception as e:
-                    self.result_text.insert(tk.END, f"文件加密失败 {file_path}: {str(e)}\\n")
-            
-            self.result_text.see(tk.END)
-            messagebox.showinfo("完成", f"已处理 {len(files)} 个拖拽的文件，其中 {success_count} 个加密成功")
-            
-            # 刷新文件列表
-            self.refresh_file_list()
-
     def open_settings(self):
         """
         打开设置窗口
@@ -1806,407 +957,75 @@ class FileEncryptionApp:
         title_label = ttk.Label(main_frame, text="设置", font=("Arial", 14, "bold"))
         title_label.grid(row=0, column=0, columnspan=2, pady=10)
         
-        # 版本号显示开关
-        show_version_var = tk.BooleanVar(value=self.config.get("show_version", True))
-        version_checkbox = ttk.Checkbutton(
-            main_frame, 
-            text="显示版本号", 
-            variable=show_version_var,
-            command=lambda: self.toggle_version_display(show_version_var.get())
-        )
-        version_checkbox.grid(row=1, column=0, columnspan=2, pady=5, sticky=tk.W)
-        
-        # 复制加密文件开关
-        copy_encrypted_var = tk.BooleanVar(value=self.config.get("copy_encrypted_file", False))
-        copy_encrypted_checkbox = ttk.Checkbutton(
-            main_frame, 
-            text="复制加密文件（否则复制解密文件）", 
-            variable=copy_encrypted_var,
-            command=lambda: self.toggle_copy_encrypted_setting(copy_encrypted_var.get())
-        )
-        copy_encrypted_checkbox.grid(row=2, column=0, columnspan=2, pady=5, sticky=tk.W)
-        
         # 加密方式选择
-        encryption_var = tk.StringVar(value=self.config.get("encryption_method", "AES"))
-        ttk.Label(main_frame, text="加密方式:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        encryption_combo = ttk.Combobox(main_frame, textvariable=encryption_var, 
-                                       values=["AES", "STREAM"], state="readonly")
-        encryption_combo.grid(row=3, column=1, pady=5, sticky=(tk.W, tk.E))
+        ttk.Label(main_frame, text="加密方式:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.encryption_method_var = tk.StringVar(value="AES-128")
+        encryption_methods = ["AES-128", "AES-192", "AES-256", "ChaCha20-Poly1305"]
+        self.encryption_method_combo = ttk.Combobox(main_frame, textvariable=self.encryption_method_var, values=encryption_methods, state="readonly")
+        self.encryption_method_combo.grid(row=1, column=1, pady=5, sticky=(tk.W, tk.E))
         
-        # 重新加密所有文件按钮
-        reencrypt_btn = ttk.Button(main_frame, text="更改加密方式并重新加密所有文件", 
-                                  command=lambda: self.reencrypt_all_files(encryption_var.get(), settings_window))
-        reencrypt_btn.grid(row=4, column=0, columnspan=2, pady=10)
+        # 版本号显示选择
+        ttk.Label(main_frame, text="版本号显示:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.version_display_var = tk.BooleanVar(value=True)
+        version_display_check = ttk.Checkbutton(main_frame, variable=self.version_display_var, text="显示版本号")
+        version_display_check.grid(row=2, column=1, sticky=tk.W, pady=5)
+        
+        # 复制选项: 选择复制时复制解密文件或者加密文件
+        ttk.Label(main_frame, text="复制选项:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.copy_option_var = tk.StringVar(value="decrypted")
+        copy_options = [("复制解密文件", "decrypted"), ("复制加密文件", "encrypted")]
+        copy_frame = ttk.Frame(main_frame)
+        copy_frame.grid(row=3, column=1, pady=5, sticky=(tk.W, tk.E))
+        
+        for i, (text, value) in enumerate(copy_options):
+            ttk.Radiobutton(copy_frame, text=text, variable=self.copy_option_var, value=value).grid(row=0, column=i, padx=5, sticky=tk.W)
         
         # 修改密码按钮
         change_password_btn = ttk.Button(main_frame, text="修改密码", command=lambda: self.open_change_password(settings_window))
-        change_password_btn.grid(row=5, column=0, columnspan=2, pady=10)
+        change_password_btn.grid(row=4, column=0, columnspan=2, pady=10)
+        
+        # 添加"应用"和"取消"按钮
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=5, column=0, columnspan=2, pady=20)
+        ttk.Button(button_frame, text="应用", command=lambda: self.apply_settings(settings_window)).grid(row=0, column=0, padx=5)
+        ttk.Button(button_frame, text="取消", command=settings_window.destroy).grid(row=0, column=1, padx=5)
         
         # 配置列权重
         main_frame.columnconfigure(1, weight=1)
+        settings_window.columnconfigure(0, weight=1)
+        settings_window.rowconfigure(0, weight=1)
+    
+    def apply_settings(self, settings_window):
+        """
+        应用设置
+        """
+        # 保存设置
+        self.encryption_method = self.encryption_method_var.get()
+        self.show_version = self.version_display_var.get()
+        self.copy_option = self.copy_option_var.get()
         
-        # 保存设置\n        def save_settings():\n            # 检查加密方式是否已更改\n            old_encryption_method = self.config.get(\"encryption_method\", \"AES\")\n            new_encryption_method = encryption_var.get()\n            \n            # 更新配置\n            self.config[\"encryption_method\"] = new_encryption_method\n            save_config(self.config)\n            \n            if old_encryption_method != new_encryption_method:\n                # 如果加密方式已更改，提示用户需要重新加密文件\n                if messagebox.askyesno(\"加密方式已更改\", f\"加密方式已从{old_encryption_method}更改为{new_encryption_method}。\\n需要重新加密所有文件以使用新的加密方式。\\n是否现在重新加密所有文件？\"):\n                    # 在新线程中执行重新加密，避免阻塞UI\n                    import threading\n                    reencrypt_thread = threading.Thread(target=self._reencrypt_all_files_background, \n                                                        args=(new_encryption_method, parent_window))\n                    reencrypt_thread.start()\n                    \n                    messagebox.showinfo(\"设置已保存\", f\"设置已保存！加密方式已更新为{new_encryption_method}。\\n正在后台重新加密所有文件...\")\n                else:\n                    messagebox.showinfo(\"设置已保存\", f\"设置已保存！请注意：加密方式已更新为{new_encryption_method}，\\n但现有文件仍使用{old_encryption_method}加密，\\n您可以在以后重新加密它们。\")\n            else:\n                messagebox.showinfo(\"成功\", \"设置已保存！加密方式未更改。\")\n        \n        # 保存按钮\n        save_btn = ttk.Button(main_frame, text=\"仅保存设置\", command=save_settings)\n        save_btn.grid(row=6, column=0, columnspan=2, pady=10)
-
-    def reencrypt_all_files(self, new_encryption_method, parent_window):
-        """
-        更改加密方式并重新加密所有文件
-        """
-        if not messagebox.askyesno("确认", f"确定要更改为{new_encryption_method}加密并重新加密所有文件吗？\n此操作可能需要较长时间。"):
-            return
+        # 更新窗口标题
+        if self.show_version:
+            self.root.title(f"AES-128文件加密器 v{self.version}")
+        else:
+            self.root.title("AES-128文件加密器")
         
-        try:
-            # 获取所有加密文件的列表
-            encrypted_files = get_encrypted_files_list(self.master_password)
-            
-            # 更新配置
-            self.config["encryption_method"] = new_encryption_method
-            save_config(self.config)
-            
-            # 创建进度窗口
-            progress_window = tk.Toplevel(parent_window)
-            progress_window.title("重新加密进度")
-            progress_window.geometry("400x100")
-            
-            main_frame = ttk.Frame(progress_window, padding="20")
-            main_frame.pack(fill='both', expand=True)
-            
-            ttk.Label(main_frame, text=f"正在使用{new_encryption_method}重新加密文件...").pack(pady=10)
-            
-            # 进度条
-            progress = ttk.Progressbar(main_frame, length=300, mode='determinate')
-            progress.pack(pady=10)
-            
-            # 配置进度条
-            total_files = len(encrypted_files)
-            if total_files > 0:
-                progress['maximum'] = total_files
-                progress['value'] = 0
-                parent_window.update()
-            
-            # 重新加密所有文件
-            for idx, file_info in enumerate(encrypted_files):
-                encrypted_file_path = file_info['encrypted_path']
-                
-                # 获取对应的元数据文件路径
-                encrypted_filename = os.path.basename(encrypted_file_path)
-                base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
-                metadata_filename = base_uuid + '.meta'
-                metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
-                
-                # 生成新的混淆的文件名
-                new_encrypted_filename = str(uuid.uuid4()) + '.llaes'
-                new_encrypted_file_path = os.path.join(os.path.dirname(encrypted_file_path), new_encrypted_filename)
-                
-                # 生成新元数据文件路径
-                new_base_uuid = os.path.splitext(new_encrypted_filename)[0]  # 获取新UUID部分
-                new_metadata_filename = new_base_uuid + '.meta'
-                new_metadata_path = os.path.join(os.path.dirname(encrypted_file_path), new_metadata_filename)
-                
-                # 使用新加密方式重新加密文件
-                # 由于现在我们有不同类型的加密器，需要特殊处理
-                with open(encrypted_file_path, 'rb') as f:
-                    encrypted_data = f.read()
-                
-                # 根据原文件的加密方式创建对应的解密器
-                old_encryption_method = file_info.get('encryption_method', 'AES')
-                if old_encryption_method == 'STREAM':
-                    old_cipher = StreamCipher(self.master_password)
-                else:
-                    old_cipher = AESCipher(self.master_password)
-                
-                try:
-                    # 解密原文件
-                    if old_encryption_method == 'STREAM':
-                        # 对于流加密，我们需要流式解密到临时文件，然后重新加密
-                        import tempfile
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_output:
-                            temp_output_path = temp_output.name
-                        
-                        try:
-                            old_cipher.decrypt_stream(encrypted_file_path, temp_output_path)
-                            
-                            # 读取解密后的内容
-                            with open(temp_output_path, 'rb') as f:
-                                decrypted_data = f.read()
-                        finally:
-                            # 删除临时解密文件
-                            if os.path.exists(temp_output_path):
-                                os.remove(temp_output_path)
-                    else:  # AES
-                        decrypted_data = old_cipher.decrypt(encrypted_data)
-                    
-                    # 获取元数据
-                    original_filename = None
-                    original_filepath = None
-                    creation_time = time.time()
-                    
-                    if os.path.exists(metadata_path):
-                        try:
-                            # 读取并解密元数据
-                            with open(metadata_path, 'rb') as f:
-                                encrypted_metadata = f.read()
-                            
-                            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
-                            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-                            metadata = json.loads(decrypted_metadata_json)
-                            
-                            original_filename = metadata.get("original_filename", None)
-                            original_filepath = metadata.get("original_filepath", None)
-                            creation_time = metadata.get("creation_time", time.time())
-                        except:
-                            # 如果解密元数据失败，仍然可以继续重新加密文件内容
-                            pass
-                    
-                    # 使用新加密方式加密文件内容
-                    if new_encryption_method == 'STREAM':
-                        new_cipher = StreamCipher(self.master_password)
-                        # 使用流式加密到新文件
-                        import tempfile
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_input:
-                            temp_input_path = temp_input.name
-                        
-                        try:
-                            # 将解密数据写入临时文件
-                            with open(temp_input_path, 'wb') as f:
-                                f.write(decrypted_data)
-                            
-                            # 流式加密临时文件到目标文件
-                            new_cipher.encrypt_stream(temp_input_path, new_encrypted_file_path)
-                        finally:
-                            # 删除临时输入文件
-                            if os.path.exists(temp_input_path):
-                                os.remove(temp_input_path)
-                    else:  # AES
-                        new_cipher = AESCipher(self.master_password)
-                        new_encrypted_data = new_cipher.encrypt(decrypted_data)
-                        
-                        # 原子写入新的加密文件
-                        temp_new_encrypted_path = new_encrypted_file_path + '.tmp'
-                        with open(temp_new_encrypted_path, 'wb') as f:
-                            f.write(new_encrypted_data)
-                        # 原子重命名
-                        os.replace(temp_new_encrypted_path, new_encrypted_file_path)
-                    
-                    # 创建新的加密元数据
-                    new_metadata = {
-                        "original_filename": original_filename,
-                        "original_filepath": original_filepath,
-                        "encrypted_filename": new_encrypted_filename,
-                        "creation_time": creation_time,
-                        "encryption_method": new_encryption_method  # 记录新的加密方式
-                    }
-                    
-                    # 序列化新元数据并加密
-                    new_metadata_json = json.dumps(new_metadata)
-                    new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
-                    
-                    # 原子写入新的加密元数据
-                    temp_new_metadata_path = new_metadata_path + '.tmp'
-                    with open(temp_new_metadata_path, 'wb') as f:
-                        f.write(new_encrypted_metadata)
-                    # 原子重命名
-                    os.replace(temp_new_metadata_path, new_metadata_path)
-                    
-                    # 删除旧的加密文件和元数据文件
-                    os.remove(encrypted_file_path)
-                    if os.path.exists(metadata_path):
-                        os.remove(metadata_path)
-                except Exception as e:
-                    print(f"重新加密文件失败 {encrypted_file_path}: {str(e)}")
-                    # 继续处理下一个文件
-                
-                # 更新进度条
-                progress['value'] = idx + 1
-                progress_window.update()  # 更新窗口以刷新进度条
-            
-            messagebox.showinfo("完成", f"所有文件已重新加密为{new_encryption_method}格式！")
-            
-            # 刷新文件列表
-            self.refresh_file_list()
-            
-            # 关闭进度窗口
-            progress_window.destroy()
-            
-        except Exception as e:
-            messagebox.showerror("错误", f"重新加密过程中发生错误: {str(e)}")
-
-    def _reencrypt_all_files_background(self, new_encryption_method, parent_window):
-        """
-        在后台线程中重新加密所有文件
-        """
-        try:
-            # 获取所有加密文件的列表
-            encrypted_files = get_encrypted_files_list(self.master_password)
-            
-            # 创建进度窗口
-            progress_window = tk.Toplevel(parent_window)
-            progress_window.title("重新加密进度")
-            progress_window.geometry("400x100")
-            
-            main_frame = ttk.Frame(progress_window, padding="20")
-            main_frame.pack(fill='both', expand=True)
-            
-            ttk.Label(main_frame, text=f"正在使用{new_encryption_method}重新加密文件...").pack(pady=10)
-            
-            # 进度条
-            progress = ttk.Progressbar(main_frame, length=300, mode='determinate')
-            progress.pack(pady=10)
-            
-            # 配置进度条
-            total_files = len(encrypted_files)
-            if total_files > 0:
-                progress['maximum'] = total_files
-                progress['value'] = 0
-                parent_window.update()
-            
-            # 重新加密所有文件
-            for idx, file_info in enumerate(encrypted_files):
-                encrypted_file_path = file_info['encrypted_path']
-                
-                # 获取对应的元数据文件路径
-                encrypted_filename = os.path.basename(encrypted_file_path)
-                base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
-                metadata_filename = base_uuid + '.meta'
-                metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
-                
-                # 生成新的混淆的文件名
-                new_encrypted_filename = str(uuid.uuid4()) + '.llaes'
-                new_encrypted_file_path = os.path.join(os.path.dirname(encrypted_file_path), new_encrypted_filename)
-                
-                # 生成新元数据文件路径
-                new_base_uuid = os.path.splitext(new_encrypted_filename)[0]  # 获取新UUID部分
-                new_metadata_filename = new_base_uuid + '.meta'
-                new_metadata_path = os.path.join(os.path.dirname(encrypted_file_path), new_metadata_filename)
-                
-                # 使用新加密方式重新加密文件
-                # 由于现在我们有不同类型的加密器，需要特殊处理
-                with open(encrypted_file_path, 'rb') as f:
-                    encrypted_data = f.read()
-                
-                # 根据原文件的加密方式创建对应的解密器
-                old_encryption_method = file_info.get('encryption_method', 'AES')
-                if old_encryption_method == 'STREAM':
-                    old_cipher = StreamCipher(self.master_password)
-                else:
-                    old_cipher = AESCipher(self.master_password)
-                
-                try:
-                    # 解密原文件
-                    if old_encryption_method == 'STREAM':
-                        # 对于流加密，我们需要流式解密到临时文件，然后重新加密
-                        import tempfile
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_output:
-                            temp_output_path = temp_output.name
-                        
-                        try:
-                            old_cipher.decrypt_stream(encrypted_file_path, temp_output_path)
-                            
-                            # 读取解密后的内容
-                            with open(temp_output_path, 'rb') as f:
-                                decrypted_data = f.read()
-                        finally:
-                            # 删除临时解密文件
-                            if os.path.exists(temp_output_path):
-                                os.remove(temp_output_path)
-                    else:  # AES
-                        decrypted_data = old_cipher.decrypt(encrypted_data)
-                    
-                    # 获取元数据
-                    original_filename = None
-                    original_filepath = None
-                    creation_time = time.time()
-                    
-                    if os.path.exists(metadata_path):
-                        try:
-                            # 读取并解密元数据
-                            with open(metadata_path, 'rb') as f:
-                                encrypted_metadata = f.read()
-                            
-                            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
-                            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
-                            metadata = json.loads(decrypted_metadata_json)
-                            
-                            original_filename = metadata.get("original_filename", None)
-                            original_filepath = metadata.get("original_filepath", None)
-                            creation_time = metadata.get("creation_time", time.time())
-                        except:
-                            # 如果解密元数据失败，仍然可以继续重新加密文件内容
-                            pass
-                    
-                    # 使用新加密方式加密文件内容
-                    if new_encryption_method == 'STREAM':
-                        new_cipher = StreamCipher(self.master_password)
-                        # 使用流式加密到新文件
-                        import tempfile
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_input:
-                            temp_input_path = temp_input.name
-                        
-                        try:
-                            # 将解密数据写入临时文件
-                            with open(temp_input_path, 'wb') as f:
-                                f.write(decrypted_data)
-                            
-                            # 流式加密临时文件到目标文件
-                            new_cipher.encrypt_stream(temp_input_path, new_encrypted_file_path)
-                        finally:
-                            # 删除临时输入文件
-                            if os.path.exists(temp_input_path):
-                                os.remove(temp_input_path)
-                    else:  # AES
-                        new_cipher = AESCipher(self.master_password)
-                        new_encrypted_data = new_cipher.encrypt(decrypted_data)
-                        
-                        # 原子写入新的加密文件
-                        temp_new_encrypted_path = new_encrypted_file_path + '.tmp'
-                        with open(temp_new_encrypted_path, 'wb') as f:
-                            f.write(new_encrypted_data)
-                        # 原子重命名
-                        os.replace(temp_new_encrypted_path, new_encrypted_file_path)
-                    
-                    # 创建新的加密元数据
-                    new_metadata = {
-                        "original_filename": original_filename,
-                        "original_filepath": original_filepath,
-                        "encrypted_filename": new_encrypted_filename,
-                        "creation_time": creation_time,
-                        "encryption_method": new_encryption_method  # 记录新的加密方式
-                    }
-                    
-                    # 序列化新元数据并加密
-                    new_metadata_json = json.dumps(new_metadata)
-                    new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
-                    
-                    # 原子写入新的加密元数据
-                    temp_new_metadata_path = new_metadata_path + '.tmp'
-                    with open(temp_new_metadata_path, 'wb') as f:
-                        f.write(new_encrypted_metadata)
-                    # 原子重命名
-                    os.replace(temp_new_metadata_path, new_metadata_path)
-                    
-                    # 删除旧的加密文件和元数据文件
-                    os.remove(encrypted_file_path)
-                    if os.path.exists(metadata_path):
-                        os.remove(metadata_path)
-                except Exception as e:
-                    print(f"重新加密文件失败 {encrypted_file_path}: {str(e)}")
-                    # 继续处理下一个文件
-                
-                # 更新进度条
-                progress['value'] = idx + 1
-                progress_window.update()  # 更新窗口以刷新进度条
-            
-            # 在主线程中显示完成消息
-            parent_window.after(0, lambda: messagebox.showinfo("完成", f"所有文件已重新加密为{new_encryption_method}格式！"))
-            
-            # 在主线程中刷新文件列表
-            parent_window.after(0, self.refresh_file_list)
-            
-            # 在主线程中关闭进度窗口
-            parent_window.after(0, progress_window.destroy)
-            
-        except Exception as e:
-            # 在主线程中显示错误消息
-            parent_window.after(0, lambda: messagebox.showerror("错误", f"重新加密过程中发生错误: {str(e)}"))
+        # 更新主界面标题
+        for widget in self.root.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Label) and "AES-128文件加密器" in child.cget("text"):
+                        if self.show_version:
+                            child.config(text=f"AES-128文件加密器 v{self.version}")
+                        else:
+                            child.config(text="AES-128文件加密器")
+                        break
+                break
+        
+        # 显示信息
+        messagebox.showinfo("设置已应用", f"加密方式已设置为: {self.encryption_method}\n版本号显示: {'是' if self.show_version else '否'}\n复制选项: {'解密文件' if self.copy_option == 'decrypted' else '加密文件'}")
+        # 关闭设置窗口
+        settings_window.destroy()
     
     def open_change_password(self, parent_window):
         """
@@ -2214,7 +1033,7 @@ class FileEncryptionApp:
         """
         change_window = tk.Toplevel(parent_window)
         change_window.title("修改密码")
-        change_window.geometry("400x350")
+        change_window.geometry("400x300")
         
         main_frame = ttk.Frame(change_window, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -2224,31 +1043,26 @@ class FileEncryptionApp:
         title_label.grid(row=0, column=0, columnspan=2, pady=10)
         
         # 旧密码输入
-        ttk.Label(main_frame, text="旧密码").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="旧密码:").grid(row=1, column=0, sticky=tk.W, pady=5)
         old_password_var = tk.StringVar()
         old_password_entry = ttk.Entry(main_frame, textvariable=old_password_var, show="*", width=25)
         old_password_entry.grid(row=1, column=1, pady=5)
         
         # 新密码输入
-        ttk.Label(main_frame, text="新密码").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="新密码:").grid(row=2, column=0, sticky=tk.W, pady=5)
         new_password_var = tk.StringVar()
         new_password_entry = ttk.Entry(main_frame, textvariable=new_password_var, show="*", width=25)
         new_password_entry.grid(row=2, column=1, pady=5)
         
         # 确认新密码
-        ttk.Label(main_frame, text="确认新密码").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="确认新密码:").grid(row=3, column=0, sticky=tk.W, pady=5)
         confirm_new_password_var = tk.StringVar()
         confirm_new_password_entry = ttk.Entry(main_frame, textvariable=confirm_new_password_var, show="*", width=25)
         confirm_new_password_entry.grid(row=3, column=1, pady=5)
         
-        # 进度条
-        ttk.Label(main_frame, text="进度:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        progress = ttk.Progressbar(main_frame, length=200, mode='determinate')
-        progress.grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
-        
         # 按钮框架
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=5, column=0, columnspan=2, pady=20)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=20)
         
         # 确认按钮
         ttk.Button(button_frame, text="确认", command=lambda: self.change_password(
@@ -2256,17 +1070,13 @@ class FileEncryptionApp:
             new_password_var.get(), 
             confirm_new_password_var.get(), 
             change_window, 
-            parent_window,
-            progress
+            parent_window
         )).grid(row=0, column=0, padx=5)
         
         # 取消按钮
         ttk.Button(button_frame, text="取消", command=change_window.destroy).grid(row=0, column=1, padx=5)
-        
-        # 配置列权重，使进度条可以扩展
-        main_frame.columnconfigure(1, weight=1)
     
-    def change_password(self, old_password, new_password, confirm_new_password, change_window, parent_window, progress_bar):
+    def change_password(self, old_password, new_password, confirm_new_password, change_window, parent_window):
         """
         修改密码
         """
@@ -2328,22 +1138,30 @@ class FileEncryptionApp:
             # 获取所有加密文件的列表
             encrypted_files = get_encrypted_files_list(old_password)
             
-            # 使用新密码保存密码(this creates new .pwd and .meta files)
+            # 使用新密码保存密码 (this creates new .pwd and .meta files)
             save_password(new_password)
             
             # Update the main password
             self.master_password = new_password
             
-            # 配置进度条
-            total_files = len(encrypted_files)
-            if total_files > 0:
-                progress_bar['maximum'] = total_files
-                progress_bar['value'] = 0
-                change_window.update()  # 更新窗口以显示进度条
-            
             # 重新加密所有文件
-            for idx, file_info in enumerate(encrypted_files):
+            for file_info in encrypted_files:
                 encrypted_file_path = file_info['encrypted_path']
+                
+                # 获取加密方法信息
+                encryption_method = file_info.get("encryption_method", "AES-128")
+                
+                # 解密原始文件内容
+                with open(encrypted_file_path, 'rb') as f:
+                    encrypted_data = f.read()
+                
+                # 根据原加密方法创建解密器
+                if encryption_method == "ChaCha20-Poly1305":
+                    old_cipher = ChaCha20Cipher(old_password)
+                else:  # 默认使用AES-128
+                    old_cipher = AESCipher(old_password)
+                
+                decrypted_data = old_cipher.decrypt(encrypted_data)
                 
                 # 获取对应的元数据文件路径
                 encrypted_filename = os.path.basename(encrypted_file_path)
@@ -2351,34 +1169,99 @@ class FileEncryptionApp:
                 metadata_filename = base_uuid + '.meta'
                 metadata_path = os.path.join(os.path.dirname(encrypted_file_path), metadata_filename)
                 
-                # 生成新的混淆的文件名
+                original_filename = None
+                original_filepath = None
+                creation_time = time.time()
+                
+                if os.path.exists(metadata_path):
+                    # 尝试使用原加密方法对应的解密器解密元数据
+                    if encryption_method == "ChaCha20-Poly1305":
+                        try:
+                            with open(metadata_path, 'rb') as f:
+                                encrypted_metadata = f.read()
+                            
+                            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
+                            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
+                            metadata = json.loads(decrypted_metadata_json)
+                            
+                            original_filename = metadata.get("original_filename", None)
+                            original_filepath = metadata.get("original_filepath", None)
+                            creation_time = metadata.get("creation_time", time.time())
+                        except:
+                            # 如果ChaCha20解密失败，尝试用AES解密（向后兼容）
+                            try:
+                                fallback_cipher = AESCipher(old_password)
+                                with open(metadata_path, 'rb') as f:
+                                    encrypted_metadata = f.read()
+                                
+                                decrypted_metadata_bytes = fallback_cipher.decrypt(encrypted_metadata)
+                                decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
+                                metadata = json.loads(decrypted_metadata_json)
+                                
+                                original_filename = metadata.get("original_filename", None)
+                                original_filepath = metadata.get("original_filepath", None)
+                                creation_time = metadata.get("creation_time", time.time())
+                            except:
+                                # 如果所有解密方法都失败，仍然可以继续重新加密文件内容
+                                pass
+                    else:  # 使用AES解密元数据
+                        try:
+                            with open(metadata_path, 'rb') as f:
+                                encrypted_metadata = f.read()
+                            
+                            decrypted_metadata_bytes = old_cipher.decrypt(encrypted_metadata)
+                            decrypted_metadata_json = decrypted_metadata_bytes.decode('utf-8')
+                            metadata = json.loads(decrypted_metadata_json)
+                            
+                            original_filename = metadata.get("original_filename", None)
+                            original_filepath = metadata.get("original_filepath", None)
+                            creation_time = metadata.get("creation_time", time.time())
+                        except:
+                            # 如果解密元数据失败，仍然可以继续重新加密文件内容
+                            pass
+                
+                # 使用新密码和原加密方法加密文件内容
+                if encryption_method == "ChaCha20-Poly1305":
+                    new_cipher = ChaCha20Cipher(new_password)
+                else:  # 默认使用AES-128
+                    new_cipher = AESCipher(new_password)
+                
+                new_encrypted_data = new_cipher.encrypt(decrypted_data)
+                
+                # 生成新混淆的文件名
                 new_encrypted_filename = str(uuid.uuid4()) + '.llaes'
                 new_encrypted_file_path = os.path.join(os.path.dirname(encrypted_file_path), new_encrypted_filename)
                 
-                # 生成新元数据文件路径
+                # 写入新的加密文件
+                with open(new_encrypted_file_path, 'wb') as f:
+                    f.write(new_encrypted_data)
+                
+                # 创建新的加密元数据
+                new_metadata = {
+                    "original_filename": original_filename or file_info['original_name'],
+                    "original_filepath": original_filepath,
+                    "encrypted_filename": new_encrypted_filename,
+                    "encryption_method": encryption_method,  # 保持原来的加密方法
+                    "creation_time": creation_time
+                }
+                
+                # 序列化新元数据并加密
+                new_metadata_json = json.dumps(new_metadata)
+                new_encrypted_metadata = new_cipher.encrypt(new_metadata_json.encode('utf-8'))
+                
+                # 存储新的加密元数据
                 new_base_uuid = os.path.splitext(new_encrypted_filename)[0]  # 获取新UUID部分
                 new_metadata_filename = new_base_uuid + '.meta'
                 new_metadata_path = os.path.join(os.path.dirname(encrypted_file_path), new_metadata_filename)
                 
-                # 使用分块方式重新加密文件
-                reencrypt_file_chunked(
-                    encrypted_file_path, 
-                    old_password, 
-                    new_encrypted_file_path, 
-                    new_password, 
-                    metadata_path, 
-                    new_metadata_path
-                )
+                with open(new_metadata_path, 'wb') as f:
+                    f.write(new_encrypted_metadata)
                 
                 # 删除旧的加密文件和元数据文件
                 os.remove(encrypted_file_path)
                 if os.path.exists(metadata_path):
                     os.remove(metadata_path)
-                
-                # 更新进度条
-                progress_bar['value'] = idx + 1
-                change_window.update()  # 更新窗口以刷新进度条
-                
+            
             # --- NEW: Delete old password and meta files AFTER saving new password and re-encrypting files ---
             # Delete the old encrypted password file and its corresponding meta file
             try:
@@ -2401,19 +1284,730 @@ class FileEncryptionApp:
             parent_window.destroy()
         except Exception as e:
             messagebox.showerror("错误", f"修改密码时发生错误: {str(e)}")
+    
+    def refresh_file_list(self):
+        """
+        刷新加密文件列表
+        """
+        # 清空当前列表
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
+        
+        try:
+            # 使用主密码获取加密文件列表
+            encrypted_files = get_encrypted_files_list(self.master_password)
+            
+            # 添加到列表中
+            for file_info in encrypted_files:
+                # 格式化文件大小
+                size_str = f"{file_info['size']} 字节"
+                if file_info['size'] > 1024:
+                    size_str = f"{file_info['size']/1024:.1f} KB"
+                if file_info['size'] > 1024*1024:
+                    size_str = f"{file_info['size']/(1024*1024):.1f} MB"
+                
+                # 格式化修改时间
+                mod_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(file_info['mod_time']))
+                
+                # 添加到列表
+                self.file_tree.insert("", "end", values=(
+                    file_info['original_name'],
+                    file_info['encrypted_name'],
+                    size_str,
+                    mod_time_str
+                ), tags=(file_info['encrypted_path'],))  # 将完整路径存储在tags中
+        except Exception as e:
+            messagebox.showerror("错误", f"获取文件列表失败: {str(e)}")
+    
+    def on_file_select(self, event):
+        """
+        当在列表中选择文件时触发
+        """
+        selection = self.file_tree.selection()
+        if selection:
+            item = self.file_tree.item(selection[0])
+            # 从tags中获取加密文件的完整路径
+            if item['tags']:
+                self.selected_encrypted_file = item['tags'][0]
+    
+    def show_context_menu(self, event):
+        """
+        显示右键菜单
+        """
+        # 获取右键点击位置的项目
+        item_id = self.file_tree.identify_row(event.y)
+        if item_id:
+            # 选中该项目，以便删除操作作用于正确的文件
+            self.file_tree.selection_set(item_id)
+            self.on_file_select(None)  # 更新 self.selected_encrypted_file
+
+            # 创建上下文菜单
+            context_menu = tk.Menu(self.root, tearoff=0)
+            context_menu.add_command(label="删除文件", command=self.delete_selected_file)
+            context_menu.add_command(label="拖拽解密", command=self.drag_decrypt_file)
+            context_menu.add_command(label="复制文件", command=self.copy_selected_file)
+
+            # 在鼠标位置显示菜单
+            try:
+                context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                context_menu.grab_release()  # 确保菜单在点击后消失
+    
+    def drag_decrypt_file(self):
+        """
+        通过右键菜单选择拖拽解密功能
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+
+        # 获取加密文件的原始文件名
+        import json
+        
+        # 获取当前文件的信息
+        all_files = get_encrypted_files_list(self.master_password)
+        current_file_info = None
+        for file_info in all_files:
+            if file_info['encrypted_path'] == self.selected_encrypted_file:
+                current_file_info = file_info
+                break
+        
+        original_name = current_file_info['original_name'] if current_file_info else "decrypted_file"
+        
+        # 让用户选择保存位置
+        save_path = filedialog.asksaveasfilename(
+            title="选择解密文件保存位置",
+            defaultextension=os.path.splitext(original_name)[1] or ".*",
+            initialfile=original_name,
+            filetypes=[
+                ("所有文件", "*.*"),
+                ("文本文件", "*.txt"),
+                ("图片文件", "*.jpg *.jpeg *.png *.gif"),
+                ("PDF文件", "*.pdf")
+            ]
+        )
+        
+        if not save_path:
+            return  # 用户取消了操作
+
+        try:
+            # 使用主密码解密文件到用户选择的位置
+            final_path = decrypt_file(
+                self.selected_encrypted_file, 
+                self.master_password,
+                output_dir=os.path.dirname(save_path),
+                output_filename=os.path.basename(save_path),
+                delete_on_success=True  # 解密成功后删除原始加密文件
+            )
+            
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, "拖拽解密成功！\n")
+            self.result_text.insert(tk.END, f"原始加密文件: {os.path.basename(self.selected_encrypted_file)}\n")
+            self.result_text.insert(tk.END, f"解密后文件: {final_path}\n")
+            self.result_text.insert(tk.END, "原始加密文件已删除\n")
+            
+            messagebox.showinfo("成功", f"文件已解密并删除原始加密文件!\n解密文件路径: {final_path}")
+            
+            # 刷新文件列表
+            self.refresh_file_list()
+        except Exception as e:
+            messagebox.showerror("拖拽解密失败", f"发生错误: {str(e)}")
+
+    def copy_selected_file(self):
+        """
+        复制选中的加密文件或解密文件到剪贴板
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+
+        try:
+            import tempfile
+            import shutil
+            
+            # 根据设置决定复制哪个文件
+            if self.copy_option == "decrypted":
+                # 获取加密文件的原始文件名
+                all_files = get_encrypted_files_list(self.master_password)
+                current_file_info = None
+                for file_info in all_files:
+                    if file_info['encrypted_path'] == self.selected_encrypted_file:
+                        current_file_info = file_info
+                        break
+                
+                original_name = current_file_info['original_name'] if current_file_info else "decrypted_file"
+                
+                # 创建临时文件进行解密
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(original_name)[1]) as tmp_file:
+                    tmp_path = tmp_file.name
+                
+                # 解密到临时文件
+                final_path = decrypt_file(
+                    self.selected_encrypted_file,
+                    self.master_password,
+                    output_dir=os.path.dirname(tmp_path),
+                    output_filename=os.path.basename(tmp_path)
+                )
+                
+                # 尝试复制到剪贴板
+                try:
+                    # 复制文件路径到剪贴板
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(final_path)
+                    messagebox.showinfo("复制成功", f"解密文件路径已复制到剪贴板: {final_path}")
+                except:
+                    # 如果无法直接复制文件到剪贴板，至少复制路径
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(final_path)
+                    messagebox.showinfo("复制成功", f"解密文件路径已复制到剪贴板，文件位于: {final_path}")
+                
+            else:  # copy_option == "encrypted"
+                # 直接复制加密文件
+                try:
+                    # 复制加密文件路径到剪贴板
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(self.selected_encrypted_file)
+                    messagebox.showinfo("复制成功", f"加密文件路径已复制到剪贴板: {self.selected_encrypted_file}")
+                except Exception as e:
+                    messagebox.showerror("复制失败", f"复制加密文件时发生错误: {str(e)}")
+        
+        except Exception as e:
+            messagebox.showerror("复制失败", f"发生错误: {str(e)}")
+
+    def delete_selected_file(self):
+        """
+        删除选中的加密文件及其元数据
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+
+        # 从加密文件路径推断元数据文件路径
+        encrypted_filename = os.path.basename(self.selected_encrypted_file)
+        base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
+        metadata_filename = base_uuid + '.meta'
+        metadata_path = os.path.join(os.path.dirname(self.selected_encrypted_file), metadata_filename)
+
+        # 确认删除
+        result = messagebox.askyesno("确认删除", f"确定要删除以下文件吗？\n\n加密文件: {encrypted_filename}\n元数据文件: {metadata_filename}")
+        if not result:
+            return  # 用户取消了删除
+
+        try:
+            # 删除加密文件
+            os.remove(self.selected_encrypted_file)
+            print(f"已删除加密文件: {self.selected_encrypted_file}")  # 日志记录
+
+            # 删除对应的元数据文件（如果存在）
+            if os.path.exists(metadata_path):
+                os.remove(metadata_path)
+                print(f"已删除元数据文件: {metadata_path}")  # 日志记录
+            else:
+                print(f"未找到元数据文件: {metadata_path}, 可能已损坏或不包含元数据") # 日志记录
+
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"文件删除操作完成。\n")
+            self.result_text.insert(tk.END, f"已删除加密文件: {encrypted_filename}\n")
+            # 因为在删除前已经检查并处理了元数据文件，所以这里只需记录操作
+            self.result_text.insert(tk.END, f"尝试删除元数据文件: {metadata_filename}\n")
+
+            # 刷新文件列表以反映更改
+            self.refresh_file_list()
+            messagebox.showinfo("成功", f"文件已删除!\n加密文件: {encrypted_filename}")
+
+        except FileNotFoundError as fnf_error:
+            error_msg = f"删除失败: 找不到文件 - {fnf_error}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+        except PermissionError as perm_error:
+            error_msg = f"删除失败: 权限不足 - {perm_error}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+        except Exception as e:
+            error_msg = f"删除文件时发生错误: {str(e)}"
+            print(error_msg) # 日志记录
+            messagebox.showerror("删除失败", error_msg)
+
+
+    def add_file(self):
+        """
+        添加文件并加密
+        """
+        file_path = filedialog.askopenfilename(
+            title="选择要加密的文件",
+            filetypes=[
+                ("所有文件", "*.*"),
+                ("文本文件", "*.txt"),
+                ("图片文件", "*.jpg *.jpeg *.png *.gif"),
+                ("PDF文件", "*.pdf")
+            ]
+        )
+        
+        if not file_path:
+            return
+        
+        # 使用主密码加密文件
+        self.encrypt_file_with_master_password(file_path)
+    
+    def decrypt_selected_file(self):
+        """
+        解密选中的加密文件
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+        
+        try:
+            # 获取加密文件的原始文件名
+            import json
+            
+            # 获取当前文件的信息
+            all_files = get_encrypted_files_list(self.master_password)
+            current_file_info = None
+            for file_info in all_files:
+                if file_info['encrypted_path'] == self.selected_encrypted_file:
+                    current_file_info = file_info
+                    break
+            
+            # 获取原始文件名
+            original_name = current_file_info['original_name'] if current_file_info else "decrypted_file"
+            
+            # 让用户选择保存位置和文件名
+            save_path = filedialog.asksaveasfilename(
+                title="选择解密文件保存位置",
+                defaultextension=os.path.splitext(original_name)[1] or ".*",
+                initialfile=original_name,
+                filetypes=[
+                    ("所有文件", "*.*"),
+                    ("文本文件", "*.txt"),
+                    ("图片文件", "*.jpg *.jpeg *.png *.gif"),
+                    ("PDF文件", "*.pdf")
+                ]
+            )
+            
+            if not save_path:
+                return  # 用户取消了操作
+
+            # 使用主密码解密文件到用户选择的位置
+            final_path = decrypt_file(
+                self.selected_encrypted_file, 
+                self.master_password,
+                output_dir=os.path.dirname(save_path),
+                output_filename=os.path.basename(save_path),
+                delete_on_success=True
+            )
+            
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, "解密成功！\n")
+            self.result_text.insert(tk.END, f"加密文件: {os.path.basename(self.selected_encrypted_file)}\n")
+            self.result_text.insert(tk.END, f"解密后文件: {final_path}\n")
+            
+            messagebox.showinfo("成功", f"文件已解密!\n解密文件路径: {final_path}")
+            
+            # 刷新文件列表
+            self.refresh_file_list()
+        except Exception as e:
+            messagebox.showerror("解密失败", f"发生错误: {str(e)}")
+    
+    def view_selected_file(self):
+        """
+        查看选中的加密文件内容（通过临时解密到系统Temp文件夹）
+        """
+        if not self.selected_encrypted_file:
+            messagebox.showwarning("警告", "请先从列表中选择一个加密文件")
+            return
+        
+        import tempfile
+        import time
+        
+        try:
+            # 获取加密文件的原始文件名用于生成混淆的临时文件名
+            import json
+            
+            # 获取当前文件的信息
+            all_files = get_encrypted_files_list(self.master_password)
+            current_file_info = None
+            for file_info in all_files:
+                if file_info['encrypted_path'] == self.selected_encrypted_file:
+                    current_file_info = file_info
+                    break
+            
+            # 获取原始文件名
+            original_name = current_file_info['original_name'] if current_file_info else "temp_file"
+            
+            # 生成混淆的临时文件名：当前时间 + 混淆的原文件名
+            timestamp = str(int(time.time() * 1000))  # 毫秒级时间戳
+            temp_filename = f"{timestamp}_{original_name}"
+            
+            # 使用主密码解密文件到系统Temp文件夹，使用混淆的文件名
+            temp_file_path = decrypt_file(
+                self.selected_encrypted_file, 
+                self.master_password,
+                output_dir=tempfile.gettempdir(),
+                output_filename=temp_filename
+            )
+            
+            # 尝试用系统默认程序打开临时文件
+            os.startfile(temp_file_path)  # Windows系统
+            
+            # 启动后台线程或计时器来稍后删除临时文件
+            # 这里简单地使用一个计时器，等待一段时间后自动删除文件
+            self.root.after(10000, lambda: self._delete_temp_file(temp_file_path))  # 10秒后删除
+            
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"文件已临时解密到: {temp_file_path}\n")
+            self.result_text.insert(tk.END, "文件将在10秒后自动删除。\n")
+            
+        except Exception as e:
+            messagebox.showerror("查看失败", f"发生错误: {str(e)}")
+    
+    def _delete_temp_file(self, file_path):
+        """
+        删除临时文件
+        """
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                self.result_text.insert(tk.END, f"\n临时文件已删除: {file_path}")
+        except Exception as e:
+            # 如果删除失败，通常是因为用户已经手动删除了文件或权限问题
+            pass
+
+    def on_file_click(self, event):
+        """
+        处理鼠标点击事件，记录点击位置和项目
+        """
+        # 记录点击位置
+        self.drag_data["x"] = event.x
+        self.drag_data["y"] = event.y
+        
+        # 获取点击的项目
+        item_id = self.file_tree.identify_row(event.y)
+        if item_id:
+            self.drag_data["item"] = item_id
+
+    def on_drag_start(self, event):
+        """
+        处理拖拽开始事件
+        """
+        # 计算拖拽距离
+        delta_x = abs(event.x - self.drag_data["x"])
+        delta_y = abs(event.y - self.drag_data["y"])
+        
+        # 如果拖拽距离超过阈值，开始拖拽操作
+        if delta_x > 3 or delta_y > 3:
+            # 选中项目
+            if self.drag_data["item"]:
+                self.file_tree.selection_set(self.drag_data["item"])
+                self.on_file_select(None)  # 更新 self.selected_encrypted_file
+                
+                # 启动拖拽操作
+                self.start_drag_operation()
+
+    def on_drag_end(self, event):
+        """
+        处理拖拽结束事件
+        """
+        # 重置拖拽数据
+        self.drag_data = {"x": 0, "y": 0, "item": None}
+
+    def start_drag_operation(self):
+        """
+        开始拖拽操作
+        """
+        if not self.selected_encrypted_file:
+            return
+
+        # 显示提示信息
+        self.result_text.insert(tk.END, "正在准备拖拽解密操作...\n")
+        
+        # 创建一个临时解密文件，用于拖拽操作
+        import tempfile
+        import time
+        import threading
+        
+        # 获取加密文件信息
+        all_files = get_encrypted_files_list(self.master_password)
+        current_file_info = None
+        for file_info in all_files:
+            if file_info['encrypted_path'] == self.selected_encrypted_file:
+                current_file_info = file_info
+                break
+        
+        original_name = current_file_info['original_name'] if current_file_info else "decrypted_file"
+        
+        # 生成临时文件名
+        timestamp = str(int(time.time() * 1000))  # 毫秒级时间戳
+        temp_filename = f"temp_decrypted_{timestamp}_{original_name}"
+        
+        try:
+            # 在后台线程中执行解密
+            threading.Thread(
+                target=self.perform_drag_decrypt,
+                args=(temp_filename,),
+                daemon=True
+            ).start()
+        except Exception as e:
+            messagebox.showerror("错误", f"启动拖拽解密时发生错误: {str(e)}")
+
+    def perform_drag_decrypt(self, temp_filename):
+        """
+        执行拖拽解密操作
+        """
+        import tempfile as tmp
+        import os
+        import time
+        
+        try:
+            # 创建临时解密文件
+            temp_file_path = decrypt_file(
+                self.selected_encrypted_file,
+                self.master_password,
+                output_dir=tmp.gettempdir(),
+                output_filename=temp_filename
+            )
+            
+            # 通过显示消息提示用户，实际的拖拽操作在tkinter中实现较复杂
+            # 这里我们让用户知道文件已解密到临时目录，可以手动复制
+            def show_drag_hint():
+                messagebox.showinfo(
+                    "拖拽解密提示", 
+                    f"文件已临时解密到: {temp_file_path}\n\n" +
+                    "请手动打开文件位置并复制到目标位置。\n" +
+                    "解密完成后原加密文件将被自动删除。"
+                )
+                
+                # 询问用户是否已完成复制，以便删除原加密文件
+                if messagebox.askyesno("确认", "解密文件已准备好，是否删除原始加密文件？"):
+                    # 删除原始加密文件和对应元数据
+                    encrypted_filename = os.path.basename(self.selected_encrypted_file)
+                    base_uuid = os.path.splitext(encrypted_filename)[0]  # 获取UUID部分
+                    metadata_filename = base_uuid + '.meta'
+                    metadata_path = os.path.join(os.path.dirname(self.selected_encrypted_file), metadata_filename)
+                    
+                    # 删除加密文件
+                    if os.path.exists(self.selected_encrypted_file):
+                        os.remove(self.selected_encrypted_file)
+                        
+                    # 删除元数据文件（如果存在）
+                    if os.path.exists(metadata_path):
+                        os.remove(metadata_path)
+                    
+                    # 刷新文件列表
+                    self.root.after(0, self.refresh_file_list)
+                    
+                    # 在结果区域显示信息
+                    self.root.after(0, lambda: self.result_text.insert(tk.END, f"原始加密文件已删除\n"))
+            
+            self.root.after(0, show_drag_hint)
+            
+        except Exception as e:
+            error_msg = f"拖拽解密失败: {str(e)}"
+            print(error_msg)  # 日志记录
+            self.root.after(0, lambda: messagebox.showerror("拖拽解密失败", error_msg))
+
+    def on_drop(self, event):
+        """
+        处理拖拽文件事件
+        """
+        # 获取拖拽的文件路径
+        files = self.root.tk.splitlist(event.data)
+
+        # 对每个拖拽的文件进行加密
+        for file_path in files:
+            # 验证文件是否存在
+            if os.path.isfile(file_path):
+                self.encrypt_file_with_master_password(file_path)
+            else:
+                print(f"警告: 文件不存在 - {file_path}")
+
+
+    
+    def encrypt_file_with_master_password(self, file_path):
+        """
+        使用主密码加密文件
+        """
+        if not file_path:
+            messagebox.showerror("错误", "请选择要加密的文件")
+            return
+        
+        if not os.path.exists(file_path):
+            messagebox.showerror("错误", "所选文件不存在")
+            return
+        
+        try:
+            # 执行加密（使用主密码和当前加密方法）
+            encrypted_file_path = encrypt_file(file_path, self.master_password, self.encryption_method)
+            
+            # 在结果区域显示信息
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, "加密成功！\n")
+            self.result_text.insert(tk.END, f"原文件: {file_path}\n")
+            self.result_text.insert(tk.END, f"加密方式: {self.encryption_method}\n")
+            self.result_text.insert(tk.END, f"加密后文件: {os.path.basename(encrypted_file_path)}\n")
+            self.result_text.insert(tk.END, f"\n注意: 加密后的文件已存储到Data文件夹中，并使用了混淆文件名\n")
+            
+            messagebox.showinfo("成功", f"文件已加密!\n加密方式: {self.encryption_method}\n加密文件名: {os.path.basename(encrypted_file_path)}")
+            
+            # 刷新文件列表
+            self.refresh_file_list()
+        except Exception as e:
+            messagebox.showerror("加密失败", f"发生错误: {str(e)}")
+
+def cli_dir(password):
+    """命令行参数：列出加密文件"""
+    try:
+        if not verify_password(password):
+            print("错误：密码验证失败")
+            return
+        
+        encrypted_files = get_encrypted_files_list(password)
+        
+        if not encrypted_files:
+            print("没有找到加密文件")
+            return
+        
+        print(f"找到 {len(encrypted_files)} 个加密文件：")
+        print("-" * 80)
+        for i, file_info in enumerate(encrypted_files, 1):
+            # 格式化文件大小
+            size_str = f"{file_info['size']} 字节"
+            if file_info['size'] > 1024:
+                size_str = f"{file_info['size']/1024:.1f} KB"
+            if file_info['size'] > 1024*1024:
+                size_str = f"{file_info['size']/(1024*1024):.1f} MB"
+            
+            # 格式化修改时间
+            mod_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(file_info['mod_time']))
+            
+            print(f"{i}. 原文件名: {file_info['original_name']}")
+            print(f"   加密文件名: {file_info['encrypted_name']}")
+            print(f"   大小: {size_str}")
+            print(f"   修改时间: {mod_time_str}")
+            print("-" * 80)
+    except Exception as e:
+        print(f"列出加密文件时发生错误: {str(e)}")
+
+def cli_jia(password, file_path):
+    """命令行参数：加密文件"""
+    try:
+        if not verify_password(password):
+            print("错误：密码验证失败")
+            return
+        
+        if not os.path.exists(file_path):
+            print(f"错误：文件不存在: {file_path}")
+            return
+        
+        # 使用提供的密码加密文件
+        encrypted_file_path = encrypt_file(file_path, password)
+        print(f"文件已加密: {os.path.basename(encrypted_file_path)}")
+        print(f"原始文件: {file_path}")
+    except Exception as e:
+        print(f"加密文件时发生错误: {str(e)}")
+
+def cli_jie(password, encrypted_filename, output_path):
+    """命令行参数：解密文件"""
+    try:
+        if not verify_password(password):
+            print("错误：密码验证失败")
+            return
+        
+        # 查找匹配的加密文件
+        encrypted_files = get_encrypted_files_list(password)
+        target_file = None
+        for file_info in encrypted_files:
+            if file_info['encrypted_name'] == encrypted_filename or os.path.basename(file_info['encrypted_path']) == encrypted_filename:
+                target_file = file_info
+                break
+        
+        if not target_file:
+            print(f"错误：找不到加密文件: {encrypted_filename}")
+            return
+        
+        # 确保输出路径存在
+        if os.path.isdir(output_path):
+            # 如果输出路径是目录，则使用原始文件名
+            original_filename = target_file['original_name']
+            if original_filename.startswith("未知文件"):
+                original_filename = os.path.splitext(encrypted_filename)[0] + "_decrypted"
+            output_file_path = os.path.join(output_path, original_filename)
+        else:
+            # 如果输出路径包含文件名
+            output_file_path = output_path
+            os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+        
+        # 解密文件
+        decrypted_path = decrypt_file(
+            target_file['encrypted_path'],
+            password,
+            output_dir=os.path.dirname(output_file_path),
+            output_filename=os.path.basename(output_file_path)
+        )
+        print(f"文件已解密: {decrypted_path}")
+        print(f"加密文件: {encrypted_filename}")
+    except Exception as e:
+        print(f"解密文件时发生错误: {str(e)}")
 
 def main():
-    # 检查是否已设置密码
-    if is_password_set():
-        # 如果已设置密码，显示验证界面
-        root = tk.Tk() if not HAS_DND else tkinterdnd2.Tk()
-        app = PasswordVerificationApp(root)
-    else:
-        # 如果未设置密码，显示设置界面
-        root = tk.Tk() if not HAS_DND else tkinterdnd2.Tk()
-        app = PasswordSetupApp(root)
+    """
+    主程序入口
+    """
+    if len(sys.argv) > 1:
+        # 如果提供了命令行参数，解析并执行相应操作
+        if sys.argv[1] == "-dir" and len(sys.argv) == 3:
+            cli_dir(sys.argv[2])
+            return
+        elif sys.argv[1] == "-jia" and len(sys.argv) == 4:
+            cli_jia(sys.argv[2], sys.argv[3])
+            return
+        elif sys.argv[1] == "-jie" and len(sys.argv) == 5:
+            cli_jie(sys.argv[2], sys.argv[3], sys.argv[4])
+            return
+        else:
+            # 如果参数不符合要求，显示帮助信息
+            print("使用方法:")
+            print("  列出加密文件: main.py -dir <密码>")
+            print("  加密文件: main.py -jia <密码> <文件路径>")
+            print("  解密文件: main.py -jie <密码> <加密文件名> <解密到的位置>")
+            return
     
-    root.mainloop()
+    # 如果没有命令行参数，启动GUI
+    # 确保Data目录存在
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # 检查Data目录中的文件
+    has_meta_files = False
+    has_pwd_files = False
+    
+    if os.path.exists(DATA_DIR):
+        files = os.listdir(DATA_DIR)
+        has_meta_files = any(f.endswith('.meta') for f in files)
+        has_pwd_files = any(f.endswith('.pwd') for f in files)
+    
+    # 如果没有meta文件，表示没有设置过密码
+    if not has_meta_files:
+        # 没有设置过密码，清空Data文件夹（以防有残留文件）并显示设置界面
+        clear_data_folder()
+        root = tk.Tk()
+        app = PasswordSetupApp(root)
+        root.mainloop()
+    elif has_meta_files and not has_pwd_files:
+        # 有meta文件但没有pwd文件，表示密码文件被删除，需要重置
+        clear_data_folder()
+        root = tk.Tk()
+        app = PasswordSetupApp(root)
+        root.mainloop()
+    else:
+        # 既有meta文件也有pwd文件，显示验证界面
+        root = tk.Tk()
+        app = PasswordVerificationApp(root)
+        root.mainloop()
+
 
 if __name__ == "__main__":
     main()
